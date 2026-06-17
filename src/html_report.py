@@ -375,7 +375,7 @@ def build_report(
 <body>
   <header>
     <h1>{html.escape(report_date)} A股板块趋势报告</h1>
-    <div class="meta">生成日期：{now} ｜ 数据源：AkShare/东方财富 ｜ 逻辑：先板块趋势，后板块内个股趋势，ETF 独立候选</div>
+    <div class="meta">生成日期：{now} ｜ 数据源：Baostock（日线/指数/行业成分），AkShare 可选增强 ETF 列表 ｜ 逻辑：先板块趋势，后板块内个股趋势，ETF 独立候选</div>
   </header>
   <main>
     <div class="cards">

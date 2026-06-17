@@ -3,6 +3,7 @@ numpy>=2.0
 streamlit>=1.36
 plotly>=5.22
 akshare>=1.14
+baostock>=0.8.9
 tushare>=1.4
 pytest>=8.2
 pyinstaller>=6.10

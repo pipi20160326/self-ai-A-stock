@@ -6,7 +6,7 @@ import pandas as pd
 
 from src.config import Settings, settings
 from src.data.cache import SqliteCache
-from src.data.providers import AkShareProvider, MarketDataProvider, TushareProvider
+from src.data.providers import AkShareProvider, BaostockProvider, MarketDataProvider, TushareProvider
 
 
 @dataclass
@@ -21,6 +21,8 @@ class MarketDataService:
             self.provider = self._build_provider()
 
     def _build_provider(self) -> MarketDataProvider:
+        if self.config.data_provider in {"auto", "baostock"}:
+            return BaostockProvider()
         if self.config.data_provider == "tushare":
             return TushareProvider(self.config.tushare_token)
         return AkShareProvider()

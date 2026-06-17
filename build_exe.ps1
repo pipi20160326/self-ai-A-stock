@@ -11,6 +11,7 @@ python -m PyInstaller `
   --collect-all altair `
   --collect-all plotly `
   --collect-all akshare `
+  --collect-all baostock `
   --collect-all pyarrow `
   --hidden-import streamlit.web.cli `
   --add-data "app.py;." `

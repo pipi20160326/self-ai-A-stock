@@ -1,6 +1,6 @@
 # A 股板块趋势策略扫描与回测工具
 
-一个“先板块、后个股”的日线趋势扫描与回测工具。默认使用 AkShare，配置 `TUSHARE_TOKEN` 后可预留切换 Tushare 数据源。
+一个“先板块、后个股”的日线趋势扫描与回测工具。默认使用 Baostock 获取 A 股日线、指数和行业成分数据，ETF 列表仍可选用 AkShare 增强；配置 `TUSHARE_TOKEN` 后可预留切换 Tushare 数据源。
 
 > 仅用于研究和学习，不构成投资建议。
 
@@ -26,6 +26,7 @@ python -m src.cli update-data
 ```powershell
 $env:DATA_PROVIDER="auto"
 $env:TUSHARE_TOKEN=""
+$env:BAOSTOCK_SECTOR_MEMBER_LIMIT="30"
 $env:SCAN_TOP_SECTORS="5"
 $env:SCAN_TOP_STOCKS_PER_SECTOR="3"
 $env:MARKET_FILTER="true"
