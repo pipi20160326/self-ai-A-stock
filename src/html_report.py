@@ -144,6 +144,7 @@ def build_report(
     etf_prefilter: int,
     top_etfs: int,
     output: Path,
+    member_limit: int = 40,
 ) -> Path:
     data = MarketDataService(settings)
     errors: list[str] = []
@@ -166,6 +167,7 @@ def build_report(
     for _, item in candidates.iterrows():
         sector = item["sector"]
         try:
+            print(f"[report] scoring sector: {sector}", flush=True)
             hist = data.sector_history(sector, start, report_date, board_type)
             scored = score_sector(hist, benchmark)
             sector_rows.append({"sector": sector, "code": item.get("code", ""), "today_pct": item.get("pct_chg", ""), **scored})
@@ -176,6 +178,7 @@ def build_report(
     for sector_rank, sector in enumerate(ranked.to_dict("records"), start=1):
         sector_key = sector.get("code") or sector["sector"]
         try:
+            print(f"[report] loading members: {sector['sector']}", flush=True)
             members = data.sector_members(sector_key, board_type)
         except Exception as exc:
             errors.append(f"{sector['sector']} 成分股失败：{exc}")
@@ -183,12 +186,13 @@ def build_report(
 
         picks = []
         allowed_members = members[members["symbol"].map(_is_allowed_stock)] if "symbol" in members.columns else members
-        for _, member in allowed_members.head(40).iterrows():
+        for _, member in allowed_members.head(member_limit).iterrows():
             raw_symbol = str(member.get("symbol", "")).strip()
             if not raw_symbol:
                 continue
             symbol = raw_symbol.zfill(6)
             try:
+                print(f"[report] scoring stock: {sector['sector']} {symbol}", flush=True)
                 hist = data.stock_history(symbol, start, report_date)
                 scored = score_stock(hist, float(sector["score"]))
                 if not pd.notna(scored.get("score")) or scored.get("score") == float("-inf"):
@@ -360,6 +364,7 @@ def main() -> None:
     parser.add_argument("--prefilter", type=int, default=80)
     parser.add_argument("--top-sectors", type=int, default=20)
     parser.add_argument("--stocks-per-sector", type=int, default=3)
+    parser.add_argument("--member-limit", type=int, default=40)
     parser.add_argument("--etf-prefilter", type=int, default=50)
     parser.add_argument("--top-etfs", type=int, default=10)
     parser.add_argument("--output", default=None)
@@ -375,6 +380,7 @@ def main() -> None:
         args.etf_prefilter,
         args.top_etfs,
         output,
+        args.member_limit,
     )
     print(path)
 

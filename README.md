@@ -32,7 +32,18 @@ $env:SCAN_TOP_STOCKS_PER_SECTOR="3"
 $env:MARKET_FILTER="true"
 $env:START_DATE="20200101"
 $env:INITIAL_CASH="1000000"
+$env:DATA_REQUEST_TIMEOUT="15"
+$env:DATA_RETRY_ATTEMPTS="2"
+$env:DATA_RETRY_DELAY="1"
+$env:DAILY_PREFILTER="40"
+$env:DAILY_TOP_SECTORS="12"
+$env:DAILY_STOCKS_PER_SECTOR="3"
+$env:DAILY_MEMBER_LIMIT="20"
+$env:DAILY_ETF_PREFILTER="30"
+$env:DAILY_TOP_ETFS="10"
 ```
+
+也可以复制 `.env.example` 为 `.env`，定时任务和页面启动时会自动读取 `.env`。`.env` 已被 git 忽略，不会提交到仓库。
 
 ## 输出
 
@@ -70,6 +81,13 @@ python -m src.daily_job
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup_daily_task.ps1
+```
+
+查看任务状态和日志：
+
+```powershell
+schtasks /Query /TN AStockTrendDailyReport /V /FO LIST
+Get-Content .\logs\daily_report.log -Tail 80
 ```
 
 通知配置是可选的。未配置时只入库不推送：

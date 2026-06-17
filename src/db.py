@@ -191,7 +191,7 @@ def init_database() -> None:
                 """,
                 (DB_NAME,),
             )
-            stock_columns = {row["column_name"] for row in cur.fetchall()}
+            stock_columns = {(row.get("column_name") or row.get("COLUMN_NAME")) for row in cur.fetchall()}
             migrations = {
                 "stance_text": "alter table report_stocks add column stance_text varchar(32) null after signal_text",
                 "stance_score": "alter table report_stocks add column stance_score decimal(16,4) null after stance_text",
@@ -213,6 +213,13 @@ def _to_decimal(value: Any) -> float | None:
             return float(text[:-1]) / 100
         return float(text)
     except ValueError:
+        return None
+
+
+def _to_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None
 
 
@@ -389,6 +396,9 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                 report_id = int(cur.lastrowid)
 
             for _, row in sector_df.iterrows():
+                rank_no = _to_int(row.get("排名"))
+                if rank_no is None:
+                    continue
                 cur.execute(
                     """
                     insert into report_sectors
@@ -398,7 +408,7 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                     (
                         report_id,
                         report_date,
-                        int(row["排名"]),
+                        rank_no,
                         str(row["板块"]),
                         _to_decimal(row["当日涨幅"]),
                         _to_decimal(row["趋势分"]),
@@ -410,6 +420,9 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                 )
 
             for _, row in stock_df.iterrows():
+                sector_rank = _to_int(row.get("板块排名"))
+                if sector_rank is None:
+                    continue
                 cur.execute(
                     """
                     insert into report_stocks
@@ -420,7 +433,7 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                     (
                         report_id,
                         report_date,
-                        int(row["板块排名"]),
+                        sector_rank,
                         str(row["板块"]),
                         str(row["代码"]).zfill(6),
                         str(row["名称"]),
@@ -437,6 +450,9 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                 )
 
             for _, row in etf_df.iterrows():
+                rank_no = _to_int(row.get("排名"))
+                if rank_no is None:
+                    continue
                 cur.execute(
                     """
                     insert into report_etfs
@@ -446,7 +462,7 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                     (
                         report_id,
                         report_date,
-                        int(row["排名"]),
+                        rank_no,
                         str(row["代码"]).zfill(6),
                         str(row["名称"]),
                         str(row["信号"]),

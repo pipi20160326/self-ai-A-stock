@@ -62,12 +62,13 @@ def run_daily(report_date: date, force: bool = False, notify_enabled: bool = Tru
         report_date=ymd,
         start=settings.start_date,
         board_type="industry",
-        prefilter=80,
-        top_sectors=20,
-        stocks_per_sector=3,
-        etf_prefilter=50,
-        top_etfs=10,
+        prefilter=settings.daily_prefilter,
+        top_sectors=settings.daily_top_sectors,
+        stocks_per_sector=settings.daily_stocks_per_sector,
+        etf_prefilter=settings.daily_etf_prefilter,
+        top_etfs=settings.daily_top_etfs,
         output=output,
+        member_limit=settings.daily_member_limit,
     )
     report_id = save_report_to_db(iso, path)
     changes = report_changes(report_id)

@@ -1,10 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import time
 from typing import Protocol
 
 import pandas as pd
+
+_REQUEST_TIMEOUT_INSTALLED = False
+
+
+def install_requests_timeout() -> None:
+    global _REQUEST_TIMEOUT_INSTALLED
+    if _REQUEST_TIMEOUT_INSTALLED:
+        return
+    try:
+        import requests
+    except ImportError:
+        return
+    original = requests.sessions.Session.request
+    timeout = float(os.getenv("DATA_REQUEST_TIMEOUT", "15"))
+
+    def request_with_timeout(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", timeout)
+        return original(self, method, url, **kwargs)
+
+    requests.sessions.Session.request = request_with_timeout
+    _REQUEST_TIMEOUT_INSTALLED = True
 
 
 def normalize_code(code: str) -> str:
@@ -37,7 +59,9 @@ def _market_prefix(symbol: str) -> str:
     return f"sh{code}" if code.startswith(("5", "6", "9")) else f"sz{code}"
 
 
-def retry_call(func, attempts: int = 5, delay: float = 1.5):
+def retry_call(func, attempts: int | None = None, delay: float | None = None):
+    attempts = attempts or int(os.getenv("DATA_RETRY_ATTEMPTS", "2"))
+    delay = delay if delay is not None else float(os.getenv("DATA_RETRY_DELAY", "1"))
     last_error = None
     for attempt in range(attempts):
         try:
@@ -73,6 +97,7 @@ class AkShareProvider:
     name: str = "akshare"
 
     def _ak(self):
+        install_requests_timeout()
         try:
             import akshare as ak
         except ImportError as exc:
