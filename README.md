@@ -1,0 +1,116 @@
+# A 股板块趋势策略扫描与回测工具
+
+一个“先板块、后个股”的日线趋势扫描与回测工具。默认使用 AkShare，配置 `TUSHARE_TOKEN` 后可预留切换 Tushare 数据源。
+
+> 仅用于研究和学习，不构成投资建议。
+
+## 安装
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+## 使用
+
+```powershell
+streamlit run app.py
+uvicorn api_server:app --host 127.0.0.1 --port 8600
+python -m src.cli scan
+python -m src.cli backtest --start 20240101 --end 20241231
+python -m src.cli update-data
+```
+
+常用环境变量：
+
+```powershell
+$env:DATA_PROVIDER="auto"
+$env:TUSHARE_TOKEN=""
+$env:SCAN_TOP_SECTORS="5"
+$env:SCAN_TOP_STOCKS_PER_SECTOR="3"
+$env:MARKET_FILTER="true"
+$env:START_DATE="20200101"
+$env:INITIAL_CASH="1000000"
+```
+
+## 输出
+
+- `data/cache/market_cache.sqlite3`：本地 SQLite 缓存。
+- `reports/daily/YYYY-MM-DD_scan.csv`：每日扫描清单。
+- `reports/backtest/`：回测净值、交易明细、指标。
+
+## MySQL 历史报告与定时任务
+
+默认 MySQL 配置：
+
+```powershell
+$env:MYSQL_HOST="127.0.0.1"
+$env:MYSQL_PORT="3306"
+$env:MYSQL_USER="root"
+$env:MYSQL_PASSWORD="<your-mysql-password>"
+$env:MYSQL_DATABASE="astock_strategy"
+```
+
+补录已有 HTML：
+
+```powershell
+python -m src.daily_job --date 2026-06-16 --html 2026-06-16-report.html --no-notify
+```
+
+收盘后生成并入库：
+
+```powershell
+python -m src.daily_job
+```
+
+每天建议在 A 股收盘后执行，默认脚本按 16:00 设计。脚本会自动判断交易日，周六日和节假日跳过。
+
+安装每天 16:00 自动任务需要管理员权限：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_daily_task.ps1
+```
+
+通知配置是可选的。未配置时只入库不推送：
+
+```powershell
+$env:DINGTALK_WEBHOOK="https://oapi.dingtalk.com/robot/send?access_token=..."
+$env:SMTP_HOST="smtp.example.com"
+$env:SMTP_PORT="465"
+$env:SMTP_USER="your@email.com"
+$env:SMTP_PASSWORD="password-or-auth-code"
+$env:SMTP_TO="target@email.com"
+```
+
+## 后台服务与监控
+
+启动页面：
+
+```powershell
+streamlit run app.py
+```
+
+启动接口服务：
+
+```powershell
+uvicorn api_server:app --host 127.0.0.1 --port 8600
+```
+
+常用接口：
+
+```text
+GET  /health
+GET  /score?kind=stock&code=600519
+GET  /score?kind=sector&code=BK1625
+GET  /score?kind=etf&code=510300
+POST /backtest
+GET  /reports
+GET  /reports/{id}/html
+GET  /monitors
+POST /monitors
+POST /monitor/run
+GET  /monitor/events
+```
+
+监控目标可以在 Streamlit 的“监控”页添加，也可以通过接口添加。每日任务生成报告后会自动执行监控，达到条件后写入 `monitor_events`，并在配置了邮箱或钉钉时推送。
