@@ -79,8 +79,34 @@ class MarketDataService:
             return self._refresh_or_cached(key, lambda: self.provider.stock_history(symbol, start, end, adjust))
         return self._cached(key, lambda: self.provider.stock_history(symbol, start, end, adjust))
 
+    def etf_history(self, symbol: str, start: str, end: str, refresh: bool = False) -> pd.DataFrame:
+        key = ("etf_history", symbol, start, end)
+        if refresh:
+            return self._refresh_or_cached(key, lambda: self.provider.etf_history(symbol, start, end))
+        return self._cached(key, lambda: self.provider.etf_history(symbol, start, end))
+
     def benchmark_history(self, symbol: str, start: str, end: str, refresh: bool = False) -> pd.DataFrame:
         key = ("benchmark_history", symbol, start, end)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.benchmark_history(symbol, start, end))
         return self._cached(key, lambda: self.provider.benchmark_history(symbol, start, end))
+
+    def stock_fund_flow(self, symbol: str, refresh: bool = False) -> pd.DataFrame:
+        key = ("stock_fund_flow", symbol)
+        try:
+            if refresh:
+                return self._refresh_or_cached(key, lambda: self.provider.stock_fund_flow(symbol))
+            return self._cached(key, lambda: self.provider.stock_fund_flow(symbol))
+        except Exception as exc:
+            self.warnings.append(f"个股资金流获取失败: {symbol}。原始错误: {exc}")
+            return pd.DataFrame()
+
+    def sector_fund_flow(self, sector: str, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
+        key = ("sector_fund_flow", board_type, sector)
+        try:
+            if refresh:
+                return self._refresh_or_cached(key, lambda: self.provider.sector_fund_flow(sector, board_type))
+            return self._cached(key, lambda: self.provider.sector_fund_flow(sector, board_type))
+        except Exception as exc:
+            self.warnings.append(f"板块资金流获取失败: {sector}。原始错误: {exc}")
+            return pd.DataFrame()

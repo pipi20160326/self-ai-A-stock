@@ -10,6 +10,8 @@ def with_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     high = out["high"].astype(float)
     low = out["low"].astype(float)
     amount = out.get("amount", pd.Series(index=out.index, dtype=float)).astype(float)
+    out["ma5"] = close.rolling(5, min_periods=5).mean()
+    out["ma10"] = close.rolling(10, min_periods=10).mean()
     out["ma20"] = close.rolling(20, min_periods=20).mean()
     out["ma60"] = close.rolling(60, min_periods=60).mean()
     out["ret20"] = close.pct_change(20)
@@ -46,4 +48,3 @@ def sharpe_ratio(equity: pd.Series) -> float:
     if returns.empty or returns.std() == 0:
         return 0.0
     return float(returns.mean() / returns.std() * np.sqrt(244))
-

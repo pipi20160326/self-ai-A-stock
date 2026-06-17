@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.strategy.sector import score_sector
 from src.strategy.stock import score_stock
+from src.strategy.indicators import with_indicators
 
 
 def make_history(start: str = "2024-01-01", periods: int = 90, slope: float = 1.0) -> pd.DataFrame:
@@ -45,3 +46,10 @@ def test_stock_losing_trend_is_sell() -> None:
     scored = score_stock(hist, sector_score=-0.1)
     assert scored["signal"] in {"卖出", "观察"}
 
+
+def test_indicators_include_short_and_long_moving_averages() -> None:
+    detail = with_indicators(make_history(periods=12))
+    assert {"ma5", "ma10", "ma20", "ma60"}.issubset(detail.columns)
+    assert pd.notna(detail.iloc[-1]["ma5"])
+    assert pd.notna(detail.iloc[-1]["ma10"])
+    assert pd.isna(detail.iloc[-1]["ma20"])

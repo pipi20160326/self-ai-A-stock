@@ -54,6 +54,52 @@ def normalize_price_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values("date").drop_duplicates("date").reset_index(drop=True)
 
 
+def normalize_fund_flow_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {
+        "日期": "date",
+        "名称": "name",
+        "代码": "symbol",
+        "主力净流入-净额": "main_net_inflow",
+        "主力净流入-净占比": "main_net_ratio",
+        "超大单净流入-净额": "super_net_inflow",
+        "超大单净流入-净占比": "super_net_ratio",
+        "大单净流入-净额": "big_net_inflow",
+        "大单净流入-净占比": "big_net_ratio",
+        "中单净流入-净额": "mid_net_inflow",
+        "中单净流入-净占比": "mid_net_ratio",
+        "小单净流入-净额": "small_net_inflow",
+        "小单净流入-净占比": "small_net_ratio",
+        "今日主力净流入-净额": "main_net_inflow",
+        "今日主力净流入-净占比": "main_net_ratio",
+        "最新价": "price",
+        "涨跌幅": "pct_chg",
+    }
+    out = frame.rename(columns={k: v for k, v in rename_map.items() if k in frame.columns}).copy()
+    if "date" in out.columns:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    for col in [
+        "main_net_inflow",
+        "main_net_ratio",
+        "super_net_inflow",
+        "super_net_ratio",
+        "big_net_inflow",
+        "big_net_ratio",
+        "mid_net_inflow",
+        "mid_net_ratio",
+        "small_net_inflow",
+        "small_net_ratio",
+        "price",
+        "pct_chg",
+    ]:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    if "symbol" in out.columns:
+        out["symbol"] = out["symbol"].map(normalize_code)
+    if "date" in out.columns:
+        out = out.sort_values("date").drop_duplicates("date")
+    return out.reset_index(drop=True)
+
+
 def _market_prefix(symbol: str) -> str:
     code = normalize_code(symbol)
     return f"sh{code}" if code.startswith(("5", "6", "9")) else f"sz{code}"
@@ -88,7 +134,16 @@ class MarketDataProvider(Protocol):
     def stock_history(self, symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
         ...
 
+    def etf_history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        ...
+
     def benchmark_history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        ...
+
+    def stock_fund_flow(self, symbol: str) -> pd.DataFrame:
+        ...
+
+    def sector_fund_flow(self, sector_name: str, board_type: str = "industry") -> pd.DataFrame:
         ...
 
 
@@ -153,6 +208,11 @@ class AkShareProvider:
             raw = retry_call(lambda: ak.stock_zh_a_daily(symbol=_market_prefix(symbol), start_date=start, end_date=end, adjust=adjust))
             return normalize_price_frame(raw)
 
+    def etf_history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        ak = self._ak()
+        raw = retry_call(lambda: ak.fund_etf_hist_em(symbol=normalize_code(symbol), period="daily", start_date=start, end_date=end, adjust=""))
+        return normalize_price_frame(raw)
+
     def benchmark_history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         ak = self._ak()
         code = normalize_code(symbol)
@@ -170,6 +230,22 @@ class AkShareProvider:
             frame["date_key"] = pd.to_datetime(frame["date"]).dt.strftime("%Y%m%d")
             frame = frame[(frame["date_key"] >= start) & (frame["date_key"] <= end)].drop(columns=["date_key"])
             return frame.reset_index(drop=True)
+
+    def stock_fund_flow(self, symbol: str) -> pd.DataFrame:
+        ak = self._ak()
+        code = normalize_code(symbol)
+        market = "sh" if code.startswith(("6", "9")) else "sz"
+        raw = retry_call(lambda: ak.stock_individual_fund_flow(stock=code, market=market))
+        return normalize_fund_flow_frame(raw)
+
+    def sector_fund_flow(self, sector_name: str, board_type: str = "industry") -> pd.DataFrame:
+        ak = self._ak()
+        try:
+            raw = retry_call(lambda: ak.stock_sector_fund_flow_hist(symbol=sector_name))
+        except Exception:
+            sector_type = "概念资金流" if board_type == "concept" else "行业资金流"
+            raw = retry_call(lambda: ak.stock_sector_fund_flow_rank(indicator="今日", sector_type=sector_type))
+        return normalize_fund_flow_frame(raw)
 
 
 @dataclass
@@ -206,9 +282,18 @@ class TushareProvider:
         raw["date"] = pd.to_datetime(raw["date"]).dt.strftime("%Y-%m-%d")
         return normalize_price_frame(raw)
 
+    def etf_history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError("Tushare ETF 历史行情暂未适配；请使用 DATA_PROVIDER=auto。")
+
     def benchmark_history(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         pro = self._pro()
         raw = pro.index_daily(ts_code=f"{normalize_code(symbol)}.SH", start_date=start, end_date=end)
         raw = raw.rename(columns={"trade_date": "date", "vol": "volume"})
         raw["date"] = pd.to_datetime(raw["date"]).dt.strftime("%Y-%m-%d")
         return normalize_price_frame(raw)
+
+    def stock_fund_flow(self, symbol: str) -> pd.DataFrame:
+        raise NotImplementedError("Tushare 资金流暂未适配；请使用 DATA_PROVIDER=auto。")
+
+    def sector_fund_flow(self, sector_name: str, board_type: str = "industry") -> pd.DataFrame:
+        raise NotImplementedError("Tushare 板块资金流暂未适配；请使用 DATA_PROVIDER=auto。")

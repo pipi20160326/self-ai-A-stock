@@ -6,32 +6,15 @@ import pandas as pd
 
 from src.config import settings
 from src.data import MarketDataService
-from src.data.providers import normalize_price_frame
 from src.db import fetch_monitor_targets, save_monitor_event
 from src.manual_score import score_sector_key, score_stock_code
 from src.notifier import notify
 from src.strategy.stock import score_stock
 
 
-def retry_call(func, attempts: int = 5, delay: float = 1.5):
-    import time
-
-    last_error = None
-    for attempt in range(attempts):
-        try:
-            return func()
-        except Exception as exc:
-            last_error = exc
-            if attempt < attempts - 1:
-                time.sleep(delay * (attempt + 1))
-    raise last_error
-
-
-def score_etf(symbol: str, start: str, end: str) -> tuple[dict, pd.DataFrame]:
-    import akshare as ak
-
-    raw = retry_call(lambda: ak.fund_etf_hist_em(symbol=symbol.strip(), period="daily", start_date=start, end_date=end, adjust=""))
-    history = normalize_price_frame(raw)
+def score_etf(symbol: str, start: str, end: str, data: MarketDataService | None = None) -> tuple[dict, pd.DataFrame]:
+    data = data or MarketDataService(settings)
+    history = data.etf_history(symbol.strip(), start, end)
     return score_stock(history, 0.0), history
 
 
@@ -43,7 +26,7 @@ def score_monitor_target(data: MarketDataService, target: dict, start: str, end:
     if target_type == "sector":
         return score_sector_key(data, code, start, end, "industry", settings)
     if target_type == "etf":
-        return score_etf(code, start, end)
+        return score_etf(code, start, end, data)
     raise ValueError(f"未知监控类型: {target_type}")
 
 

@@ -101,7 +101,7 @@ def _to_float_or_none(value):
         return None
 
 
-def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, errors: list[str]) -> list[dict]:
+def _load_etf_candidates(data: MarketDataService, start: str, end: str, prefilter: int, limit: int, errors: list[str]) -> list[dict]:
     try:
         import akshare as ak
     except ImportError:
@@ -130,7 +130,7 @@ def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, error
     max_amount = float(etfs["amount"].max()) if not etfs.empty and pd.notna(etfs["amount"].max()) else 0.0
 
     rows = []
-    for _, item in etfs.iterrows():
+    for _, item in etfs.head(limit).iterrows():
         raw_symbol = str(item.get("symbol", "")).strip()
         if not raw_symbol or raw_symbol.lower() == "nan":
             continue
@@ -141,6 +141,23 @@ def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, error
             continue
         amount_score = (amount / max_amount * 0.15) if amount is not None and max_amount > 0 else 0
         score = 0.25 + pct_chg / 100 + amount_score
+        signal = "买入"
+        close = _to_float_or_none(item.get("price"))
+        ret20 = None
+        ret60 = None
+        reason = "ETF列表涨幅为正、按涨幅和成交额排序；历史K线暂不可用"
+        try:
+            hist = data.etf_history(symbol, start, end, refresh=False)
+            scored = score_stock(hist, 0.0)
+            if pd.notna(scored.get("score")) and scored.get("score") != float("-inf"):
+                score = score + max(float(scored.get("score", 0)), 0) * 0.5
+                signal = "观察" if scored.get("signal") == "卖出" else scored.get("signal", signal)
+                close = scored.get("close", close)
+                ret20 = scored.get("ret20")
+                ret60 = scored.get("ret60")
+                reason = "ETF涨幅和成交额靠前；" + scored.get("reason", "")
+        except Exception as exc:
+            errors.append(f"ETF {symbol} 历史K线失败：{exc}")
         rows.append(
             {
                 "symbol": symbol,
@@ -148,11 +165,11 @@ def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, error
                 "today_pct": pct_chg,
                 "amount": amount or 0,
                 "score": score,
-                "signal": "买入",
-                "close": _to_float_or_none(item.get("price")),
-                "ret20": None,
-                "ret60": None,
-                "reason": "ETF列表涨幅为正、按涨幅和成交额排序；未逐只拉历史K线，避免公开接口断连",
+                "signal": signal,
+                "close": close,
+                "ret20": ret20,
+                "ret60": ret60,
+                "reason": reason,
             }
         )
     return sorted(rows, key=lambda x: x["score"], reverse=True)[:limit]
@@ -250,7 +267,7 @@ def build_report(
             ]
         )
 
-    etf_rows = _load_etf_candidates(start, report_date, etf_prefilter, top_etfs, errors)
+    etf_rows = _load_etf_candidates(data, start, report_date, etf_prefilter, top_etfs, errors)
     errors.extend(data.warnings)
 
     sector_table = _table(

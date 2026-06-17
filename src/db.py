@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import pandas as pd
-import pymysql
+
+try:
+    import pymysql
+except ImportError:  # pragma: no cover - exercised only when optional DB deps are missing
+    pymysql = None
 
 
 DB_NAME = os.getenv("MYSQL_DATABASE", "astock_strategy")
@@ -29,6 +33,8 @@ db_config = MySQLConfig()
 
 @contextmanager
 def mysql_conn(database: str | None = DB_NAME) -> Iterator[pymysql.Connection]:
+    if pymysql is None:
+        raise RuntimeError("pymysql 未安装，报告和监控数据库功能不可用；请先运行 pip install -r requirements.txt")
     conn = pymysql.connect(
         host=db_config.host,
         port=db_config.port,
