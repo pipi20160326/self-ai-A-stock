@@ -19,6 +19,7 @@ from src.db import (
 )
 from src.manual_score import score_sector_key, score_stock_code
 from src.monitor import run_monitor, score_etf
+from src.daily_job import run_daily
 
 
 app = FastAPI(title="AStock Trend API")
@@ -46,6 +47,12 @@ class MonitorTargetRequest(BaseModel):
     min_score: float | None = None
     required_signal: str | None = None
     note: str = ""
+
+
+class DailyReportRequest(BaseModel):
+    report_date: str | None = None
+    force: bool = False
+    notify: bool = True
 
 
 def service() -> MarketDataService:
@@ -102,6 +109,18 @@ def reports(limit: int = 30) -> list[dict]:
 @app.get("/reports/{report_id}/html")
 def report_html(report_id: int) -> dict:
     return {"html": fetch_report_html(report_id)}
+
+
+@app.post("/daily-report/run")
+def run_daily_report(req: DailyReportRequest) -> dict:
+    report_day = date.today() if not req.report_date else date.fromisoformat(req.report_date)
+    path = run_daily(report_day, force=req.force, notify_enabled=req.notify)
+    return {
+        "ok": path is not None,
+        "report_date": report_day.isoformat(),
+        "path": str(path) if path else "",
+        "message": "generated" if path else "skipped_non_trade_day",
+    }
 
 
 @app.get("/monitors")

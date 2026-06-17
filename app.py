@@ -324,9 +324,17 @@ with tabs[7]:
     st.subheader("任务中心")
     st.caption("这里的按钮会把结果写入 MySQL，之后可在“历史报告”和“监控”页查看。")
     task_date = st.date_input("任务日期", date.today(), key="task_date")
-    c1, c2, c3 = st.columns(3)
+    c0, c1, c2, c3 = st.columns(4)
 
-    if c1.button("生成日报并入库", type="primary"):
+    if c0.button("生成今天报告并推送", type="primary"):
+        with st.spinner("正在生成今天报告、写入数据库并推送..."):
+            try:
+                path = run_daily(date.today(), force=True, notify_enabled=True)
+                st.success(f"已生成并推送：{path}")
+            except Exception as exc:
+                st.error(f"生成失败：{exc}")
+
+    if c1.button("按日期生成并入库"):
         with st.spinner("正在生成日报、写入数据库并运行监控..."):
             try:
                 path = run_daily(task_date, force=True, notify_enabled=True)

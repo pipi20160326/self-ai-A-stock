@@ -83,6 +83,14 @@ python -m src.daily_job
 powershell -ExecutionPolicy Bypass -File .\setup_daily_task.ps1
 ```
 
+定时任务实际执行 `run_daily_report.bat`，它会优先调用本机接口：
+
+```text
+POST http://127.0.0.1:8600/daily-report/run
+```
+
+如果接口服务没有启动，脚本会自动降级执行 `python -m src.daily_job`，保证报告仍可生成。
+
 查看任务状态和日志：
 
 ```powershell
@@ -128,6 +136,7 @@ GET  /score?kind=etf&code=510300
 POST /backtest
 GET  /reports
 GET  /reports/{id}/html
+POST /daily-report/run
 GET  /monitors
 POST /monitors
 POST /monitor/run
