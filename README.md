@@ -4,6 +4,22 @@
 
 > 仅用于研究和学习，不构成投资建议。
 
+## 无数据库手动版
+
+当前分支提供无数据库入口，不连接 MySQL，不入库，不定时，只手动生成本地 HTML 报告：
+
+```powershell
+streamlit run app_manual.py --server.port 8502
+uvicorn api_manual:app --host 127.0.0.1 --port 8601
+```
+
+接口：
+
+```text
+POST /daily-report/run
+GET  /daily-report/html
+```
+
 ## 安装
 
 ```powershell
