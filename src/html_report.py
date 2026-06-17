@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import os
 from datetime import date
 from pathlib import Path
 
@@ -194,6 +195,8 @@ def build_report(
     if "pct_chg" in sectors.columns:
         sectors["pct_chg"] = pd.to_numeric(sectors["pct_chg"], errors="coerce")
         sectors = sectors.sort_values(["pct_chg"], ascending=False)
+    if getattr(data.provider, "name", "") == "baostock":
+        prefilter = min(prefilter, int(os.getenv("BAOSTOCK_REPORT_PREFILTER", "12")))
     candidates = sectors.head(prefilter)
 
     try:

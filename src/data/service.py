@@ -27,6 +27,10 @@ class MarketDataService:
             return TushareProvider(self.config.tushare_token)
         return AkShareProvider()
 
+    def _key(self, kind: str, *parts: str) -> tuple[str, ...]:
+        provider_name = getattr(self.provider, "name", self.config.data_provider)
+        return (kind, str(provider_name), *[str(part) for part in parts])
+
     def _cached(self, key: tuple[str, ...], loader) -> pd.DataFrame:
         cached = self.cache.read(*key)
         if cached is not None and not cached.empty:
@@ -58,43 +62,43 @@ class MarketDataService:
         raise RuntimeError(f"数据刷新结果为空且无可用缓存: {'/'.join(key)}")
 
     def list_sectors(self, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = ("sectors", board_type)
+        key = self._key("sectors", board_type)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.list_sectors(board_type))
         return self._cached(key, lambda: self.provider.list_sectors(board_type))
 
     def sector_history(self, sector: str, start: str, end: str, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = ("sector_history", board_type, sector, start, end)
+        key = self._key("sector_history", board_type, sector, start, end)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.sector_history(sector, start, end, board_type))
         return self._cached(key, lambda: self.provider.sector_history(sector, start, end, board_type))
 
     def sector_members(self, sector: str, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = ("sector_members", board_type, sector)
+        key = self._key("sector_members", board_type, sector)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.sector_members(sector, board_type))
         return self._cached(key, lambda: self.provider.sector_members(sector, board_type))
 
     def stock_history(self, symbol: str, start: str, end: str, adjust: str = "qfq", refresh: bool = False) -> pd.DataFrame:
-        key = ("stock_history", symbol, start, end, adjust)
+        key = self._key("stock_history", symbol, start, end, adjust)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.stock_history(symbol, start, end, adjust))
         return self._cached(key, lambda: self.provider.stock_history(symbol, start, end, adjust))
 
     def etf_history(self, symbol: str, start: str, end: str, refresh: bool = False) -> pd.DataFrame:
-        key = ("etf_history", symbol, start, end)
+        key = self._key("etf_history", symbol, start, end)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.etf_history(symbol, start, end))
         return self._cached(key, lambda: self.provider.etf_history(symbol, start, end))
 
     def benchmark_history(self, symbol: str, start: str, end: str, refresh: bool = False) -> pd.DataFrame:
-        key = ("benchmark_history", symbol, start, end)
+        key = self._key("benchmark_history", symbol, start, end)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.benchmark_history(symbol, start, end))
         return self._cached(key, lambda: self.provider.benchmark_history(symbol, start, end))
 
     def stock_fund_flow(self, symbol: str, refresh: bool = False) -> pd.DataFrame:
-        key = ("stock_fund_flow", symbol)
+        key = self._key("stock_fund_flow", symbol)
         try:
             if refresh:
                 return self._refresh_or_cached(key, lambda: self.provider.stock_fund_flow(symbol))
@@ -104,7 +108,7 @@ class MarketDataService:
             return pd.DataFrame()
 
     def sector_fund_flow(self, sector: str, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = ("sector_fund_flow", board_type, sector)
+        key = self._key("sector_fund_flow", board_type, sector)
         try:
             if refresh:
                 return self._refresh_or_cached(key, lambda: self.provider.sector_fund_flow(sector, board_type))

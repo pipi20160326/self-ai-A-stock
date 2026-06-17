@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import os
 
 import pandas as pd
 
@@ -38,6 +39,11 @@ class TrendScanner:
 
     def rank_sectors(self, start: str, end: str, board_type: str = "industry", limit: int | None = None) -> pd.DataFrame:
         sectors = self.data.list_sectors(board_type)
+        provider_name = getattr(getattr(self.data, "provider", None), "name", "")
+        if provider_name == "baostock":
+            default_prefilter = max((limit or self.config.scan_top_sectors) * 3, 12)
+            prefilter = int(os.getenv("BAOSTOCK_SECTOR_PREFILTER", str(default_prefilter)))
+            sectors = sectors.head(prefilter)
         benchmark = self.data.benchmark_history(self.config.benchmark_symbol, start, end)
         rows = []
         for _, row in sectors.iterrows():

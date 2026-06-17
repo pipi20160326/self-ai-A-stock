@@ -196,6 +196,7 @@ class BaostockProvider:
         )
         out["symbol"] = out["bs_code"].astype(str).str.split(".").str[-1].map(normalize_code)
         out = out.dropna(subset=["sector"])
+        out = out[out["sector"].astype(str).str.strip().ne("")]
         self._industry_cache = out[["symbol", "name", "sector", "classification"]].reset_index(drop=True)
         return self._industry_cache.copy()
 
@@ -216,7 +217,7 @@ class BaostockProvider:
         members = self.sector_members(sector_name, board_type)
         if members.empty:
             raise RuntimeError(f"No Baostock members found for sector: {sector_name}")
-        limit = int(os.getenv("BAOSTOCK_SECTOR_MEMBER_LIMIT", "30"))
+        limit = int(os.getenv("BAOSTOCK_SECTOR_MEMBER_LIMIT", "8"))
         frames = []
         for symbol in members["symbol"].head(limit):
             hist = self.stock_history(str(symbol), start, end)
