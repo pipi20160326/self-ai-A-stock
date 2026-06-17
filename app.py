@@ -228,6 +228,7 @@ with tabs[4]:
                     "stance_score",
                     "signal_text",
                     "today_pct",
+                    "open_price",
                     "close_price",
                     "score",
                     "ret20",

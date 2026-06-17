@@ -100,6 +100,7 @@ def init_database() -> None:
             stance_text varchar(32) null,
             stance_score decimal(16,4) null,
             today_pct decimal(12,4) null,
+            open_price decimal(16,4) null,
             close_price decimal(16,4) null,
             score decimal(16,6) null,
             ret20 decimal(12,4) null,
@@ -196,6 +197,7 @@ def init_database() -> None:
                 "stance_text": "alter table report_stocks add column stance_text varchar(32) null after signal_text",
                 "stance_score": "alter table report_stocks add column stance_score decimal(16,4) null after stance_text",
                 "today_pct": "alter table report_stocks add column today_pct decimal(12,4) null after stance_score",
+                "open_price": "alter table report_stocks add column open_price decimal(16,4) null after today_pct",
             }
             for column, sql in migrations.items():
                 if column not in stock_columns:
@@ -427,8 +429,8 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                     """
                     insert into report_stocks
                     (report_id, report_date, sector_rank, sector, symbol, name, signal_text, stance_text,
-                     stance_score, today_pct, close_price, score, ret20, ret60, reason)
-                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     stance_score, today_pct, open_price, close_price, score, ret20, ret60, reason)
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """,
                     (
                         report_id,
@@ -441,7 +443,8 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                         str(row.get("观点", "")),
                         _to_decimal(row.get("观点评分")),
                         _to_decimal(row.get("当日涨幅")),
-                        _to_decimal(row["收盘"]),
+                        _to_decimal(row.get("开盘")),
+                        _to_decimal(row.get("收盘/最新", row.get("收盘"))),
                         _to_decimal(row["趋势分"]),
                         _to_decimal(row["20日"]),
                         _to_decimal(row["60日"]),

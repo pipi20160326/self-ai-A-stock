@@ -69,7 +69,7 @@ def run_daily(report_date: date, force: bool = False, notify_enabled: bool = Tru
         top_etfs=settings.daily_top_etfs,
         output=output,
         member_limit=settings.daily_member_limit,
-        refresh=True,
+        refresh=settings.daily_refresh,
     )
     report_id = save_report_to_db(iso, path)
     changes = report_changes(report_id)

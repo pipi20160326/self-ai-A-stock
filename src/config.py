@@ -62,6 +62,7 @@ class Settings:
     daily_member_limit: int = int(os.getenv("DAILY_MEMBER_LIMIT", "20"))
     daily_etf_prefilter: int = int(os.getenv("DAILY_ETF_PREFILTER", "30"))
     daily_top_etfs: int = int(os.getenv("DAILY_TOP_ETFS", "10"))
+    daily_refresh: bool = _env_bool("DAILY_REFRESH", False)
     cache_path: Path = CACHE_DIR / "market_cache.sqlite3"
 
 

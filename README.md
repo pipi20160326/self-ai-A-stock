@@ -40,6 +40,7 @@ $env:DAILY_STOCKS_PER_SECTOR="3"
 $env:DAILY_MEMBER_LIMIT="20"
 $env:DAILY_ETF_PREFILTER="30"
 $env:DAILY_TOP_ETFS="10"
+$env:DAILY_REFRESH="false"
 ```
 
 也可以复制 `.env.example` 为 `.env`，定时任务和页面启动时会自动读取 `.env`。`.env` 已被 git 忽略，不会提交到仓库。
@@ -90,7 +91,7 @@ POST http://127.0.0.1:8600/daily-report/run
 
 如果接口服务没有启动，脚本会自动降级执行 `python -m src.daily_job`，保证报告仍可生成。
 
-日报默认强制刷新行情数据，不复用本地缓存，避免开盘价、收盘价、当日涨幅因缓存滞后而不准。命令行静态报告如需调试缓存，可显式加 `--use-cache`。
+日报默认使用安全模式 `DAILY_REFRESH=false`，避免公开行情接口挂起导致报告生成失败。候选股展示价格会优先使用板块成分中的最新价/涨幅；如需强制刷新历史行情，可设置 `DAILY_REFRESH=true`，但公开接口不稳定时可能明显变慢。
 
 查看任务状态和日志：
 

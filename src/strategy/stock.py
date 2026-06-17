@@ -48,6 +48,7 @@ def score_stock(history: pd.DataFrame, sector_score: float = 0.0) -> dict:
     return {
         "score": score,
         "signal": signal,
+        "open": float(latest["open"]) if "open" in latest else None,
         "close": float(latest["close"]),
         "today_pct": today_pct,
         "ret20": float(latest["ret20"]),

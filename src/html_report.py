@@ -82,6 +82,48 @@ def _summarize_errors(errors: list[str], limit: int = 12) -> list[str]:
     return errors[:limit] + [f"其余 {len(errors) - limit} 条数据失败已省略，多为公开接口临时断连或无历史数据。"]
 
 
+def _first_value(row: pd.Series, names: list[str]):
+    for name in names:
+        if name in row and pd.notna(row[name]):
+            return row[name]
+    return None
+
+
+def _to_float_or_none(value):
+    try:
+        text = str(value).strip()
+        if text in {"", "-", "nan", "None"}:
+            return None
+        return float(text)
+    except Exception:
+        return None
+
+
+def _load_stock_spot(errors: list[str]) -> dict[str, dict]:
+    try:
+        import akshare as ak
+    except ImportError:
+        errors.append("A股快照失败：AkShare 未安装")
+        return {}
+    try:
+        raw = retry_call(lambda: ak.stock_zh_a_spot_em(), attempts=1)
+    except Exception as exc:
+        errors.append(f"A股快照失败，个股开盘/收盘/涨幅将回退历史K线：{exc}")
+        return {}
+    rows: dict[str, dict] = {}
+    for _, row in raw.iterrows():
+        raw_code = str(row.get("代码", "")).strip()
+        if not raw_code or raw_code.lower() == "nan":
+            continue
+        code = raw_code.zfill(6)
+        rows[code] = {
+            "open": _to_float_or_none(_first_value(row, ["今开", "开盘", "开盘价"])),
+            "close": _to_float_or_none(_first_value(row, ["最新价", "收盘", "收盘价"])),
+            "today_pct": _to_float_or_none(_first_value(row, ["涨跌幅"])),
+        }
+    return rows
+
+
 def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, errors: list[str]) -> list[dict]:
     try:
         import akshare as ak
@@ -194,7 +236,7 @@ def build_report(
             symbol = raw_symbol.zfill(6)
             try:
                 print(f"[report] scoring stock: {sector['sector']} {symbol}", flush=True)
-                hist = data.stock_history(symbol, start, report_date, refresh=refresh)
+                hist = data.stock_history(symbol, start, report_date, refresh=False)
                 scored = score_stock(hist, float(sector["score"]))
                 if not pd.notna(scored.get("score")) or scored.get("score") == float("-inf"):
                     continue
@@ -203,6 +245,10 @@ def build_report(
                     scored["reason"] = "大盘过滤未通过、" + scored["reason"]
                 if scored["signal"] == "卖出":
                     continue
+                scored["open"] = None
+                member_pct = _to_float_or_none(member.get("pct_chg"))
+                scored["close"] = None
+                scored["today_pct"] = member_pct / 100 if member_pct is not None else None
                 picks.append(
                     {
                         "sector_rank": sector_rank,
@@ -221,6 +267,7 @@ def build_report(
         )
 
     etf_rows = _load_etf_candidates(start, report_date, etf_prefilter, top_etfs, errors)
+    errors.extend(data.warnings)
 
     sector_table = _table(
         ["排名", "板块", "当日涨幅", "趋势分", "20日", "60日", "相对强度", "理由"],
@@ -239,7 +286,7 @@ def build_report(
         ],
     )
     stock_table = _table(
-        ["板块排名", "板块", "代码", "名称", "观点", "观点评分", "信号", "当日涨幅", "收盘", "趋势分", "20日", "60日", "理由"],
+        ["板块排名", "板块", "代码", "名称", "观点", "观点评分", "信号", "当日涨幅", "开盘", "收盘/最新", "趋势分", "20日", "60日", "理由"],
         [
             (
                 [
@@ -251,6 +298,7 @@ def build_report(
                     _view_score(row.get("score", 0)),
                     row["signal"],
                     _fmt_pct(row.get("today_pct", 0)),
+                    _fmt_num(row.get("open", 0)),
                     _fmt_num(row.get("close", 0)),
                     _fmt_num(row.get("score", 0), 4),
                     _fmt_pct(row.get("ret20", 0)),
