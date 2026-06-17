@@ -9,7 +9,7 @@ import pandas as pd
 
 from src.config import ROOT_DIR, settings
 from src.data import MarketDataService
-from src.data.providers import normalize_price_frame, retry_call
+from src.data.providers import retry_call
 from src.strategy.sector import market_is_healthy, score_sector
 from src.strategy.stock import score_stock
 
@@ -77,16 +77,18 @@ def _view_score(score: float | None) -> str:
 
 
 def _summarize_errors(errors: list[str], limit: int = 12) -> list[str]:
+    sector_failed = [e for e in errors if e.startswith("板块历史缺失:")]
+    other_errors = [e for e in errors if not e.startswith("板块历史缺失:")]
+    summarized: list[str] = []
+    if sector_failed:
+        names = [e.split(":", 1)[1].strip() for e in sector_failed]
+        shown = "、".join(names[:8])
+        suffix = f" 等 {len(names)} 个板块" if len(names) > 8 else ""
+        summarized.append(f"板块历史数据部分缺失，已跳过：{shown}{suffix}")
+    errors = summarized + other_errors
     if len(errors) <= limit:
         return errors
     return errors[:limit] + [f"其余 {len(errors) - limit} 条数据失败已省略，多为公开接口临时断连或无历史数据。"]
-
-
-def _first_value(row: pd.Series, names: list[str]):
-    for name in names:
-        if name in row and pd.notna(row[name]):
-            return row[name]
-    return None
 
 
 def _to_float_or_none(value):
@@ -97,31 +99,6 @@ def _to_float_or_none(value):
         return float(text)
     except Exception:
         return None
-
-
-def _load_stock_spot(errors: list[str]) -> dict[str, dict]:
-    try:
-        import akshare as ak
-    except ImportError:
-        errors.append("A股快照失败：AkShare 未安装")
-        return {}
-    try:
-        raw = retry_call(lambda: ak.stock_zh_a_spot_em(), attempts=1)
-    except Exception as exc:
-        errors.append(f"A股快照失败，个股开盘/收盘/涨幅将回退历史K线：{exc}")
-        return {}
-    rows: dict[str, dict] = {}
-    for _, row in raw.iterrows():
-        raw_code = str(row.get("代码", "")).strip()
-        if not raw_code or raw_code.lower() == "nan":
-            continue
-        code = raw_code.zfill(6)
-        rows[code] = {
-            "open": _to_float_or_none(_first_value(row, ["今开", "开盘", "开盘价"])),
-            "close": _to_float_or_none(_first_value(row, ["最新价", "收盘", "收盘价"])),
-            "today_pct": _to_float_or_none(_first_value(row, ["涨跌幅"])),
-        }
-    return rows
 
 
 def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, errors: list[str]) -> list[dict]:
@@ -150,29 +127,34 @@ def _load_etf_candidates(start: str, end: str, prefilter: int, limit: int, error
     etfs["pct_chg"] = pd.to_numeric(etfs.get("pct_chg"), errors="coerce")
     etfs["amount"] = pd.to_numeric(etfs.get("amount"), errors="coerce")
     etfs = etfs.sort_values(["pct_chg", "amount"], ascending=False).head(prefilter)
+    max_amount = float(etfs["amount"].max()) if not etfs.empty and pd.notna(etfs["amount"].max()) else 0.0
 
     rows = []
     for _, item in etfs.iterrows():
-        symbol = str(item.get("symbol", "")).zfill(6)
-        if not symbol:
+        raw_symbol = str(item.get("symbol", "")).strip()
+        if not raw_symbol or raw_symbol.lower() == "nan":
             continue
-        try:
-            raw = retry_call(lambda: ak.fund_etf_hist_em(symbol=symbol, period="daily", start_date=start, end_date=end, adjust=""))
-            hist = normalize_price_frame(raw)
-            scored = score_stock(hist, 0.0)
-            if scored.get("signal") != "买入":
-                continue
-            rows.append(
-                {
-                    "symbol": symbol,
-                    "name": item.get("name", ""),
-                    "today_pct": item.get("pct_chg", ""),
-                    "amount": item.get("amount", ""),
-                    **scored,
-                }
-            )
-        except Exception as exc:
-            errors.append(f"ETF {symbol} {item.get('name', '')} 历史数据失败：{exc}")
+        symbol = raw_symbol.zfill(6)
+        pct_chg = _to_float_or_none(item.get("pct_chg"))
+        amount = _to_float_or_none(item.get("amount"))
+        if pct_chg is None or pct_chg <= 0:
+            continue
+        amount_score = (amount / max_amount * 0.15) if amount is not None and max_amount > 0 else 0
+        score = 0.25 + pct_chg / 100 + amount_score
+        rows.append(
+            {
+                "symbol": symbol,
+                "name": item.get("name", ""),
+                "today_pct": pct_chg,
+                "amount": amount or 0,
+                "score": score,
+                "signal": "买入",
+                "close": _to_float_or_none(item.get("price")),
+                "ret20": None,
+                "ret60": None,
+                "reason": "ETF列表涨幅为正、按涨幅和成交额排序；未逐只拉历史K线，避免公开接口断连",
+            }
+        )
     return sorted(rows, key=lambda x: x["score"], reverse=True)[:limit]
 
 
@@ -215,9 +197,11 @@ def build_report(
             scored = score_sector(hist, benchmark)
             sector_rows.append({"sector": sector, "code": item.get("code", ""), "today_pct": item.get("pct_chg", ""), **scored})
         except Exception as exc:
-            errors.append(f"{sector} 板块历史数据失败：{exc}")
+            errors.append(f"板块历史缺失: {sector}")
 
-    ranked = pd.DataFrame(sector_rows).sort_values("score", ascending=False).head(top_sectors)
+    ranked = pd.DataFrame(sector_rows)
+    if not ranked.empty:
+        ranked = ranked.sort_values("score", ascending=False).head(top_sectors)
     for sector_rank, sector in enumerate(ranked.to_dict("records"), start=1):
         sector_key = sector.get("code") or sector["sector"]
         try:
