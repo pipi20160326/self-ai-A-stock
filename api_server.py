@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from src.backtest import BacktestEngine
 from src.config import settings
 from src.data import MarketDataService
 from src.db import (
@@ -86,19 +85,7 @@ def score(kind: str, code: str, start: str = settings.start_date, end: str | Non
 
 @app.post("/backtest")
 def backtest(req: BacktestRequest) -> dict:
-    result = BacktestEngine(service(), settings).run(
-        req.start,
-        req.end,
-        req.board_type,
-        req.top_sectors,
-        req.stocks_per_sector,
-        req.initial_cash,
-    )
-    return {
-        "metrics": result.metrics,
-        "equity": result.equity.tail(300).to_dict("records"),
-        "trades": result.trades.tail(300).to_dict("records") if not result.trades.empty else [],
-    }
+    raise HTTPException(status_code=410, detail="回测功能已停用；当前版本只保留扫描、日报、监控和手动评分。")
 
 
 @app.get("/reports")

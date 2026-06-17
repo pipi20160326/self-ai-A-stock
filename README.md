@@ -18,7 +18,6 @@ pip install -r requirements.txt
 streamlit run app.py
 uvicorn api_server:app --host 127.0.0.1 --port 8600
 python -m src.cli scan
-python -m src.cli backtest --start 20240101 --end 20241231
 python -m src.cli update-data
 ```
 
@@ -49,7 +48,7 @@ $env:DAILY_TOP_ETFS="10"
 
 - `data/cache/market_cache.sqlite3`：本地 SQLite 缓存。
 - `reports/daily/YYYY-MM-DD_scan.csv`：每日扫描清单。
-- `reports/backtest/`：回测净值、交易明细、指标。
+- `reports/backtest/`：历史兼容目录；当前页面已停用回测，避免长时间阻塞。
 
 ## MySQL 历史报告与定时任务
 
@@ -135,7 +134,7 @@ GET  /health
 GET  /score?kind=stock&code=600519
 GET  /score?kind=sector&code=BK1625
 GET  /score?kind=etf&code=510300
-POST /backtest
+POST /backtest  # 已停用，返回 410
 GET  /reports
 GET  /reports/{id}/html
 POST /daily-report/run

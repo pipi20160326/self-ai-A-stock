@@ -8,10 +8,9 @@ import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 
-from src.backtest import BacktestEngine
 from src.config import settings
 from src.data import MarketDataService
-from src.reports import save_backtest, save_daily_scan
+from src.reports import save_daily_scan
 from src.strategy import TrendScanner
 from src.strategy.indicators import with_indicators
 from src.manual_score import score_sector_key, score_stock_code
@@ -60,7 +59,7 @@ with st.sidebar:
     top_sectors = st.slider("关注板块数", 1, 20, settings.scan_top_sectors)
     stocks_per_sector = st.slider("每板块个股数", 1, 10, settings.scan_top_stocks_per_sector)
 
-tabs = st.tabs(["今日扫描", "板块排行", "个股详情", "回测", "手动评分", "历史报告", "监控", "任务中心"])
+tabs = st.tabs(["今日扫描", "板块排行", "个股详情", "手动评分", "历史报告", "监控", "任务中心"])
 
 with tabs[0]:
     st.subheader("今日扫描")
@@ -132,43 +131,6 @@ with tabs[2]:
             st.dataframe(detail.tail(80), use_container_width=True)
 
 with tabs[3]:
-    st.subheader("回测")
-    bt_start = st.date_input("回测开始", pd.to_datetime(settings.start_date), key="bt_start")
-    bt_end = st.date_input("回测结束", date.today(), key="bt_end")
-    initial_cash = st.number_input("初始资金", min_value=10000, value=int(settings.initial_cash), step=10000)
-    if st.button("运行回测", type="primary"):
-        with st.spinner("正在回测，首次运行会较慢..."):
-            try:
-                result = BacktestEngine(data, settings).run(
-                    ymd(bt_start),
-                    ymd(bt_end),
-                    board_type,
-                    top_sectors,
-                    stocks_per_sector,
-                    float(initial_cash),
-                )
-                st.session_state["bt"] = result
-                paths = save_backtest(result.equity, result.trades, result.metrics, f"{ymd(bt_start)}_{ymd(bt_end)}")
-                st.success(f"回测完成：{paths['metrics']}")
-            except Exception as exc:
-                st.error(f"回测失败：{exc}")
-    result = st.session_state.get("bt")
-    if result:
-        metrics = result.metrics
-        cols = st.columns(6)
-        cols[0].metric("总收益", pct(metrics["total_return"]))
-        cols[1].metric("年化", pct(metrics["annualized_return"]))
-        cols[2].metric("最大回撤", pct(metrics["max_drawdown"]))
-        cols[3].metric("夏普", f"{metrics['sharpe']:.2f}")
-        cols[4].metric("交易次数", metrics["trade_count"])
-        cols[5].metric("换手", f"{metrics['turnover']:.2f}x")
-        if not result.equity.empty:
-            fig = go.Figure(go.Scatter(x=result.equity["date"], y=result.equity["equity"], name="权益"))
-            fig.update_layout(height=420, xaxis_title="日期", yaxis_title="账户权益")
-            st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(result.trades, use_container_width=True)
-
-with tabs[4]:
     st.subheader("手动评分")
     score_kind = st.radio("评分对象", ["stock", "sector"], horizontal=True, format_func=lambda x: "个股" if x == "stock" else "板块")
     code = st.text_input("代码或名称", placeholder="个股如 600519；板块如 BK1625 或 钨")
@@ -196,7 +158,7 @@ with tabs[4]:
             except Exception as exc:
                 st.error(f"评分失败：{exc}")
 
-with tabs[5]:
+with tabs[4]:
     st.subheader("历史报告")
     st.caption("可以手动生成今天报告；生成后会写入数据库，并在本页直接加载 HTML。")
     if st.button("手动生成今天报告并推送", type="primary", key="history_generate_today"):
@@ -281,7 +243,7 @@ with tabs[5]:
             html_text = fetch_report_html(selected_id)
             components.html(html_text, height=900, scrolling=True)
 
-with tabs[6]:
+with tabs[5]:
     st.subheader("监控")
     try:
         init_database()
@@ -338,7 +300,7 @@ with tabs[6]:
     st.markdown("#### 最近触发")
     st.dataframe(events, use_container_width=True)
 
-with tabs[7]:
+with tabs[6]:
     st.subheader("任务中心")
     st.caption("这里的按钮会把结果写入 MySQL，之后可在“历史报告”和“监控”页查看。")
     task_date = st.date_input("任务日期", date.today(), key="task_date")
