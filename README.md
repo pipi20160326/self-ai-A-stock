@@ -83,6 +83,9 @@ $env:SMTP_PASSWORD="password-or-auth-code"
 $env:SMTP_TO="target@email.com"
 ```
 
+钉钉机器人如果开启关键词校验，请把关键词设为 `time`；每日摘要会自动包含 `time: YYYY-MM-DD HH:mm:ss`。
+推送内容会整理当天强势板块、板块内“强势看涨 / 一般看涨 / 观察”候选、ETF 候选和板块变化提醒。
+
 ## 后台服务与监控
 
 启动页面：

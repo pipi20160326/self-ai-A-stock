@@ -11,6 +11,26 @@ from .sector import market_is_healthy, score_sector
 from .stock import score_stock
 
 
+ALLOWED_STOCK_PREFIXES = ("000", "001", "002", "003", "600", "601", "603", "605")
+
+
+def _is_allowed_stock(symbol: str) -> bool:
+    return str(symbol).zfill(6).startswith(ALLOWED_STOCK_PREFIXES)
+
+
+def _stance(signal: str, score: float | None) -> str:
+    score = float(score or 0)
+    if signal == "买入" and score >= 0.6:
+        return "强势看涨"
+    if signal == "买入" and score >= 0.2:
+        return "一般看涨"
+    return "观察"
+
+
+def _stance_rank(signal: str, score: float | None) -> int:
+    return {"强势看涨": 0, "一般看涨": 1, "观察": 2}.get(_stance(signal, score), 3)
+
+
 @dataclass
 class TrendScanner:
     data: MarketDataService
@@ -58,8 +78,11 @@ class TrendScanner:
                 continue
             candidates = []
             for _, member in members.iterrows():
-                symbol = member.get("symbol")
-                if not symbol:
+                raw_symbol = str(member.get("symbol", "")).strip()
+                if not raw_symbol:
+                    continue
+                symbol = raw_symbol.zfill(6)
+                if not _is_allowed_stock(symbol):
                     continue
                 try:
                     hist = self.data.stock_history(symbol, start, end)
@@ -67,6 +90,9 @@ class TrendScanner:
                     if not healthy and scored["signal"] == "买入":
                         scored["signal"] = "观察"
                         scored["reason"] = f"大盘过滤未通过、{scored['reason']}"
+                    if scored["signal"] == "卖出":
+                        continue
+                    stance = _stance(scored.get("signal", ""), scored.get("score", 0))
                     candidates.append(
                         {
                             "scan_date": pd.to_datetime(end).strftime("%Y-%m-%d"),
@@ -75,11 +101,16 @@ class TrendScanner:
                             "sector_score": sector_row["score"],
                             "symbol": symbol,
                             "name": member.get("name", ""),
+                            "stance": stance,
+                            "stance_score": max(float(scored.get("score", 0)), 0) * 100,
                             **scored,
                         }
                     )
                 except Exception:
                     continue
-            rows.extend(sorted(candidates, key=lambda x: x["score"], reverse=True)[:stocks_per_sector])
+            rows.extend(
+                sorted(candidates, key=lambda x: (_stance_rank(x.get("signal", ""), x.get("score", 0)), -float(x.get("score", 0))))[
+                    :stocks_per_sector
+                ]
+            )
         return pd.DataFrame(rows)
-

@@ -12,6 +12,8 @@ def score_stock(history: pd.DataFrame, sector_score: float = 0.0) -> dict:
     if data.empty:
         return {"score": float("-inf"), "signal": "观察", "reason": "指标数据不足"}
     latest = data.iloc[-1]
+    prev = data.iloc[-2] if len(data) >= 2 else None
+    today_pct = float(latest["close"] / prev["close"] - 1) if prev is not None and prev["close"] else 0.0
     prev_high20 = data["high20"].shift(1).iloc[-1]
     amount_boost = latest["amount20"] / latest["amount60"] - 1 if latest.get("amount60", 0) else 0
     breakout = bool(latest["close"] >= prev_high20) if pd.notna(prev_high20) else False
@@ -47,6 +49,7 @@ def score_stock(history: pd.DataFrame, sector_score: float = 0.0) -> dict:
         "score": score,
         "signal": signal,
         "close": float(latest["close"]),
+        "today_pct": today_pct,
         "ret20": float(latest["ret20"]),
         "ret60": float(latest["ret60"]),
         "ma20": float(latest["ma20"]),
@@ -54,4 +57,3 @@ def score_stock(history: pd.DataFrame, sector_score: float = 0.0) -> dict:
         "atr14": float(latest["atr14"]),
         "reason": "、".join(reasons) or "等待趋势确认",
     }
-

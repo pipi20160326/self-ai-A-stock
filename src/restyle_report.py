@@ -24,7 +24,7 @@ def _score(text: str) -> float:
 
 def _stance(signal: str, score: float) -> tuple[str, str]:
     if signal == "买入" and score >= 0.6:
-        return "看涨", "stance-strong"
+        return "强势看涨", "stance-strong"
     if signal == "买入" and score >= 0.2:
         return "一般看涨", "stance-moderate"
     return "观察", "stance-watch"
@@ -57,7 +57,7 @@ def _restyle_table(soup: BeautifulSoup, title: str, signal_index: int, score_ind
         cells = tr.find_all("td")
         if len(cells) <= max(signal_index, score_index):
             continue
-        if any(td.get_text(strip=True) in {"看涨", "一般看涨", "观察"} for td in cells):
+        if any(td.get_text(strip=True) in {"强势看涨", "看涨", "一般看涨", "观察"} for td in cells):
             continue
         stance, cls = _stance(cells[signal_index].get_text(strip=True), _score(cells[score_index].get_text(strip=True)))
         td = soup.new_tag("td")

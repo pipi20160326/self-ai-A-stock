@@ -58,10 +58,22 @@ def _table(headers: list[str], rows: list[list[object] | tuple[list[object], str
 def _stance(signal: str, score: float | None) -> tuple[str, str]:
     score = float(score or 0)
     if signal == "买入" and score >= 0.6:
-        return "看涨", "stance-strong"
+        return "强势看涨", "stance-strong"
     if signal == "买入" and score >= 0.2:
         return "一般看涨", "stance-moderate"
     return "观察", "stance-watch"
+
+
+def _stance_rank(signal: str, score: float | None) -> int:
+    stance, _ = _stance(signal, score)
+    return {"强势看涨": 0, "一般看涨": 1, "观察": 2}.get(stance, 3)
+
+
+def _view_score(score: float | None) -> str:
+    try:
+        return f"{max(float(score), 0) * 100:.1f}"
+    except Exception:
+        return "-"
 
 
 def _summarize_errors(errors: list[str], limit: int = 12) -> list[str]:
@@ -172,9 +184,10 @@ def build_report(
         picks = []
         allowed_members = members[members["symbol"].map(_is_allowed_stock)] if "symbol" in members.columns else members
         for _, member in allowed_members.head(40).iterrows():
-            symbol = member.get("symbol")
-            if not symbol:
+            raw_symbol = str(member.get("symbol", "")).strip()
+            if not raw_symbol:
                 continue
+            symbol = raw_symbol.zfill(6)
             try:
                 hist = data.stock_history(symbol, start, report_date)
                 scored = score_stock(hist, float(sector["score"]))
@@ -183,6 +196,8 @@ def build_report(
                 if not healthy and scored["signal"] == "买入":
                     scored["signal"] = "观察"
                     scored["reason"] = "大盘过滤未通过、" + scored["reason"]
+                if scored["signal"] == "卖出":
+                    continue
                 picks.append(
                     {
                         "sector_rank": sector_rank,
@@ -194,7 +209,11 @@ def build_report(
                 )
             except Exception as exc:
                 errors.append(f"{sector['sector']} {symbol} 个股数据失败：{exc}")
-        stock_rows.extend(sorted(picks, key=lambda x: x["score"], reverse=True)[:stocks_per_sector])
+        stock_rows.extend(
+            sorted(picks, key=lambda x: (_stance_rank(x.get("signal", ""), x.get("score", 0)), -float(x.get("score", 0))))[
+                :stocks_per_sector
+            ]
+        )
 
     etf_rows = _load_etf_candidates(start, report_date, etf_prefilter, top_etfs, errors)
 
@@ -215,7 +234,7 @@ def build_report(
         ],
     )
     stock_table = _table(
-        ["板块排名", "板块", "代码", "名称", "观点", "信号", "收盘", "趋势分", "20日", "60日", "理由"],
+        ["板块排名", "板块", "代码", "名称", "观点", "观点评分", "信号", "当日涨幅", "收盘", "趋势分", "20日", "60日", "理由"],
         [
             (
                 [
@@ -224,7 +243,9 @@ def build_report(
                     row["symbol"],
                     row["name"],
                     _stance(row.get("signal", ""), row.get("score", 0))[0],
+                    _view_score(row.get("score", 0)),
                     row["signal"],
+                    _fmt_pct(row.get("today_pct", 0)),
                     _fmt_num(row.get("close", 0)),
                     _fmt_num(row.get("score", 0), 4),
                     _fmt_pct(row.get("ret20", 0)),
@@ -237,7 +258,7 @@ def build_report(
         ],
     )
     etf_table = _table(
-        ["排名", "代码", "名称", "观点", "信号", "当日涨幅", "收盘", "趋势分", "20日", "60日", "理由"],
+        ["排名", "代码", "名称", "观点", "观点评分", "信号", "当日涨幅", "收盘", "趋势分", "20日", "60日", "理由"],
         [
             (
                 [
@@ -245,6 +266,7 @@ def build_report(
                     row["symbol"],
                     row["name"],
                     _stance(row.get("signal", ""), row.get("score", 0))[0],
+                    _view_score(row.get("score", 0)),
                     row["signal"],
                     _fmt_num(row.get("today_pct", 0)) + "%",
                     _fmt_num(row.get("close", 0)),

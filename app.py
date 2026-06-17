@@ -237,7 +237,26 @@ with tabs[5]:
                 fig.update_layout(height=460, yaxis_title="排名", xaxis_title="日期", yaxis_autorange="reversed")
                 st.plotly_chart(fig, use_container_width=True)
         elif view == "候选个股":
-            st.dataframe(stocks[["sector_rank", "sector", "symbol", "name", "signal_text", "close_price", "score", "ret20", "ret60", "reason"]], use_container_width=True)
+            stock_cols = [
+                col
+                for col in [
+                    "sector_rank",
+                    "sector",
+                    "symbol",
+                    "name",
+                    "stance_text",
+                    "stance_score",
+                    "signal_text",
+                    "today_pct",
+                    "close_price",
+                    "score",
+                    "ret20",
+                    "ret60",
+                    "reason",
+                ]
+                if col in stocks.columns
+            ]
+            st.dataframe(stocks[stock_cols], use_container_width=True)
         elif view == "ETF":
             st.dataframe(etfs[["rank_no", "symbol", "name", "signal_text", "today_pct", "close_price", "score", "ret20", "ret60", "reason"]], use_container_width=True)
         else:

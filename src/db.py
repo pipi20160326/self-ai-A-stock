@@ -97,6 +97,9 @@ def init_database() -> None:
             symbol varchar(16) not null,
             name varchar(128) null,
             signal_text varchar(32) null,
+            stance_text varchar(32) null,
+            stance_score decimal(16,4) null,
+            today_pct decimal(12,4) null,
             close_price decimal(16,4) null,
             score decimal(16,6) null,
             ret20 decimal(12,4) null,
@@ -180,6 +183,23 @@ def init_database() -> None:
         with conn.cursor() as cur:
             for sql in statements:
                 cur.execute(sql)
+            cur.execute(
+                """
+                select column_name
+                from information_schema.columns
+                where table_schema=%s and table_name='report_stocks'
+                """,
+                (DB_NAME,),
+            )
+            stock_columns = {row["column_name"] for row in cur.fetchall()}
+            migrations = {
+                "stance_text": "alter table report_stocks add column stance_text varchar(32) null after signal_text",
+                "stance_score": "alter table report_stocks add column stance_score decimal(16,4) null after stance_text",
+                "today_pct": "alter table report_stocks add column today_pct decimal(12,4) null after stance_score",
+            }
+            for column, sql in migrations.items():
+                if column not in stock_columns:
+                    cur.execute(sql)
 
 
 def _to_decimal(value: Any) -> float | None:
@@ -393,8 +413,9 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                 cur.execute(
                     """
                     insert into report_stocks
-                    (report_id, report_date, sector_rank, sector, symbol, name, signal_text, close_price, score, ret20, ret60, reason)
-                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (report_id, report_date, sector_rank, sector, symbol, name, signal_text, stance_text,
+                     stance_score, today_pct, close_price, score, ret20, ret60, reason)
+                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """,
                     (
                         report_id,
@@ -404,6 +425,9 @@ def save_report_to_db(report_date: str, html_path: Path) -> int:
                         str(row["代码"]).zfill(6),
                         str(row["名称"]),
                         str(row["信号"]),
+                        str(row.get("观点", "")),
+                        _to_decimal(row.get("观点评分")),
+                        _to_decimal(row.get("当日涨幅")),
                         _to_decimal(row["收盘"]),
                         _to_decimal(row["趋势分"]),
                         _to_decimal(row["20日"]),
