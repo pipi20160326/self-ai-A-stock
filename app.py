@@ -198,6 +198,24 @@ with tabs[4]:
 
 with tabs[5]:
     st.subheader("历史报告")
+    st.caption("可以手动生成今天报告；生成后会写入数据库，并在本页直接加载 HTML。")
+    if st.button("手动生成今天报告并推送", type="primary", key="history_generate_today"):
+        with st.spinner("正在刷新行情、生成今天报告、写入数据库并推送..."):
+            try:
+                generated_path = run_daily(date.today(), force=True, notify_enabled=True)
+                if generated_path:
+                    st.session_state["history_generated_path"] = str(generated_path.resolve())
+                    st.session_state["history_generated_html"] = generated_path.read_text(encoding="utf-8")
+                    st.success(f"报告已生成：{generated_path.resolve()}")
+                else:
+                    st.info("今天不是交易日，已跳过生成。")
+            except Exception as exc:
+                st.error(f"生成失败：{exc}")
+
+    if st.session_state.get("history_generated_html"):
+        st.info(f"本地报告位置：{st.session_state.get('history_generated_path')}")
+        components.html(st.session_state["history_generated_html"], height=900, scrolling=True)
+
     try:
         init_database()
         reports = fetch_recent_reports(60)

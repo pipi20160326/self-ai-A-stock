@@ -145,17 +145,18 @@ def build_report(
     top_etfs: int,
     output: Path,
     member_limit: int = 40,
+    refresh: bool = True,
 ) -> Path:
     data = MarketDataService(settings)
     errors: list[str] = []
-    sectors = data.list_sectors(board_type, refresh=False).copy()
+    sectors = data.list_sectors(board_type, refresh=refresh).copy()
     if "pct_chg" in sectors.columns:
         sectors["pct_chg"] = pd.to_numeric(sectors["pct_chg"], errors="coerce")
         sectors = sectors.sort_values(["pct_chg"], ascending=False)
     candidates = sectors.head(prefilter)
 
     try:
-        benchmark = data.benchmark_history(settings.benchmark_symbol, start, report_date)
+        benchmark = data.benchmark_history(settings.benchmark_symbol, start, report_date, refresh=refresh)
         healthy = market_is_healthy(benchmark)
     except Exception as exc:
         benchmark = pd.DataFrame()
@@ -168,7 +169,7 @@ def build_report(
         sector = item["sector"]
         try:
             print(f"[report] scoring sector: {sector}", flush=True)
-            hist = data.sector_history(sector, start, report_date, board_type)
+            hist = data.sector_history(sector, start, report_date, board_type, refresh=refresh)
             scored = score_sector(hist, benchmark)
             sector_rows.append({"sector": sector, "code": item.get("code", ""), "today_pct": item.get("pct_chg", ""), **scored})
         except Exception as exc:
@@ -179,7 +180,7 @@ def build_report(
         sector_key = sector.get("code") or sector["sector"]
         try:
             print(f"[report] loading members: {sector['sector']}", flush=True)
-            members = data.sector_members(sector_key, board_type)
+            members = data.sector_members(sector_key, board_type, refresh=refresh)
         except Exception as exc:
             errors.append(f"{sector['sector']} 成分股失败：{exc}")
             continue
@@ -193,7 +194,7 @@ def build_report(
             symbol = raw_symbol.zfill(6)
             try:
                 print(f"[report] scoring stock: {sector['sector']} {symbol}", flush=True)
-                hist = data.stock_history(symbol, start, report_date)
+                hist = data.stock_history(symbol, start, report_date, refresh=refresh)
                 scored = score_stock(hist, float(sector["score"]))
                 if not pd.notna(scored.get("score")) or scored.get("score") == float("-inf"):
                     continue
@@ -365,6 +366,7 @@ def main() -> None:
     parser.add_argument("--top-sectors", type=int, default=20)
     parser.add_argument("--stocks-per-sector", type=int, default=3)
     parser.add_argument("--member-limit", type=int, default=40)
+    parser.add_argument("--use-cache", action="store_true", help="使用缓存行情；默认强制刷新，避免开盘价/收盘价/涨幅滞后")
     parser.add_argument("--etf-prefilter", type=int, default=50)
     parser.add_argument("--top-etfs", type=int, default=10)
     parser.add_argument("--output", default=None)
@@ -381,6 +383,7 @@ def main() -> None:
         args.top_etfs,
         output,
         args.member_limit,
+        not args.use_cache,
     )
     print(path)
 
