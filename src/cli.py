@@ -39,7 +39,7 @@ def cmd_update_data(args: argparse.Namespace) -> None:
     service.benchmark_history(settings.benchmark_symbol, start, end, refresh=True)
     if args.warm_workspace:
         scanner = TrendScanner(service, settings)
-        ranked = scanner.rank_sectors(start, end, args.board_type, args.top_sectors)
+        ranked = scanner.rank_sectors(start, end, args.board_type, args.top_sectors, refresh=True)
         print(f"预热板块: {len(ranked)}")
         for _, sector_row in ranked.iterrows():
             sector = str(sector_row["sector"])
@@ -59,7 +59,15 @@ def cmd_update_data(args: argparse.Namespace) -> None:
                 except Exception as exc:
                     print(f"  {symbol} K线失败: {exc}")
             print(f"- {sector}: 已预热 {warmed} 只")
-        scan = scanner.scan(start, end, args.board_type, args.top_sectors, args.stocks_per_sector, member_limit=args.member_limit)
+        scan = scanner.scan(
+            start,
+            end,
+            args.board_type,
+            args.top_sectors,
+            args.stocks_per_sector,
+            member_limit=args.member_limit,
+            refresh=True,
+        )
         path = save_daily_scan(scan, pd.to_datetime(end).strftime("%Y-%m-%d"))
         print(f"工作台扫描已生成: {path}")
     print("基础数据缓存已更新。")

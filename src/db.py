@@ -511,6 +511,43 @@ def fetch_recent_reports(limit: int = 30) -> pd.DataFrame:
     )
 
 
+def fetch_database_overview() -> dict[str, int | str | None]:
+    init_database()
+    with mysql_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    count(*) as report_count,
+                    min(report_date) as first_report_date,
+                    max(report_date) as latest_report_date,
+                    coalesce(sum(sector_count), 0) as sector_rows,
+                    coalesce(sum(stock_count), 0) as stock_rows,
+                    coalesce(sum(etf_count), 0) as etf_rows
+                from reports
+                """
+            )
+            row = cur.fetchone() or {}
+            cur.execute("select count(*) as event_count from monitor_events")
+            events = cur.fetchone() or {}
+            return {
+                "report_count": int(row.get("report_count") or 0),
+                "first_report_date": str(row.get("first_report_date")) if row.get("first_report_date") else None,
+                "latest_report_date": str(row.get("latest_report_date")) if row.get("latest_report_date") else None,
+                "sector_rows": int(row.get("sector_rows") or 0),
+                "stock_rows": int(row.get("stock_rows") or 0),
+                "etf_rows": int(row.get("etf_rows") or 0),
+                "monitor_event_count": int(events.get("event_count") or 0),
+            }
+
+
+def delete_report(report_id: int) -> None:
+    init_database()
+    with mysql_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from reports where id=%s", (report_id,))
+
+
 def fetch_report_html(report_id: int) -> str:
     with mysql_conn() as conn:
         with conn.cursor() as cur:

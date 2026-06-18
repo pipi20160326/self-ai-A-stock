@@ -38,3 +38,19 @@ class SqliteCache:
 
     def has(self, kind: str, *parts: str) -> bool:
         return self.read(kind, *parts) is not None
+
+    def stats(self) -> dict[str, int]:
+        if not self.path.exists():
+            return {"table_count": 0, "row_count": 0}
+        with sqlite3.connect(self.path) as conn:
+            tables = [
+                row[0]
+                for row in conn.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'").fetchall()
+            ]
+            row_count = 0
+            for table in tables:
+                try:
+                    row_count += int(conn.execute(f'select count(*) from "{table}"').fetchone()[0])
+                except sqlite3.Error:
+                    continue
+            return {"table_count": len(tables), "row_count": row_count}

@@ -37,19 +37,26 @@ class TrendScanner:
     data: MarketDataService
     config: Settings = settings
 
-    def rank_sectors(self, start: str, end: str, board_type: str = "industry", limit: int | None = None) -> pd.DataFrame:
-        sectors = self.data.list_sectors(board_type)
+    def rank_sectors(
+        self,
+        start: str,
+        end: str,
+        board_type: str = "industry",
+        limit: int | None = None,
+        refresh: bool = False,
+    ) -> pd.DataFrame:
+        sectors = self.data.list_sectors(board_type, refresh=refresh)
         provider_name = getattr(getattr(self.data, "provider", None), "name", "")
         if provider_name == "baostock":
             default_prefilter = max((limit or self.config.scan_top_sectors) * 3, 12)
             prefilter = int(os.getenv("BAOSTOCK_SECTOR_PREFILTER", str(default_prefilter)))
             sectors = sectors.head(prefilter)
-        benchmark = self.data.benchmark_history(self.config.benchmark_symbol, start, end)
+        benchmark = self.data.benchmark_history(self.config.benchmark_symbol, start, end, refresh=refresh)
         rows = []
         for _, row in sectors.iterrows():
             sector = row["sector"]
             try:
-                hist = self.data.sector_history(sector, start, end, board_type)
+                hist = self.data.sector_history(sector, start, end, board_type, refresh=refresh)
                 scored = score_sector(hist, benchmark)
                 rows.append({"sector": sector, "code": row.get("code", ""), **scored})
             except Exception as exc:
@@ -67,19 +74,20 @@ class TrendScanner:
         top_sectors: int | None = None,
         stocks_per_sector: int | None = None,
         member_limit: int | None = None,
+        refresh: bool = False,
     ) -> pd.DataFrame:
         start = start or self.config.start_date
         end = end or date.today().strftime("%Y%m%d")
         top_sectors = top_sectors or self.config.scan_top_sectors
         stocks_per_sector = stocks_per_sector or self.config.scan_top_stocks_per_sector
-        ranked = self.rank_sectors(start, end, board_type, top_sectors)
-        benchmark = self.data.benchmark_history(self.config.benchmark_symbol, start, end)
+        ranked = self.rank_sectors(start, end, board_type, top_sectors, refresh=refresh)
+        benchmark = self.data.benchmark_history(self.config.benchmark_symbol, start, end, refresh=refresh)
         healthy = market_is_healthy(benchmark) if self.config.market_filter else True
         rows = []
         for sector_rank, sector_row in ranked.iterrows():
             sector = sector_row["sector"]
             try:
-                members = self.data.sector_members(sector, board_type)
+                members = self.data.sector_members(sector, board_type, refresh=refresh)
             except Exception as exc:
                 rows.append({"sector": sector, "signal": "观察", "reason": f"成分股失败: {exc}"})
                 continue
@@ -96,7 +104,7 @@ class TrendScanner:
                 if not _is_allowed_stock(symbol):
                     continue
                 try:
-                    hist = self.data.stock_history(symbol, start, end)
+                    hist = self.data.stock_history(symbol, start, end, refresh=refresh)
                     scored = score_stock(hist, float(sector_row["score"]))
                     if not healthy and scored["signal"] == "买入":
                         scored["signal"] = "观察"
