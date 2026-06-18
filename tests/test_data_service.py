@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.config import Settings
 from src.data import MarketDataService
+from src.data.providers import BaostockProvider
 
 
 class FakeProvider:
@@ -51,3 +52,21 @@ def test_cache_is_isolated_by_provider_name(tmp_path) -> None:
     assert list(second["close"]) == [1.1, 2.2]
     assert baostock.etf_calls == 1
     assert akshare.etf_calls == 1
+
+
+def test_baostock_sector_has_local_code_and_resolves_search_key() -> None:
+    provider = BaostockProvider()
+    provider._industry_cache = pd.DataFrame(
+        [
+            {"symbol": "600001", "name": "A", "sector": "Steel", "classification": "industry"},
+            {"symbol": "600002", "name": "B", "sector": "Steel", "classification": "industry"},
+            {"symbol": "600003", "name": "C", "sector": "Bank", "classification": "industry"},
+        ]
+    )
+
+    sectors = provider.list_sectors()
+    steel_code = str(sectors.loc[sectors["sector"].eq("Steel"), "code"].iloc[0])
+
+    assert steel_code.startswith("BSI")
+    assert provider.sector_members(steel_code)["symbol"].tolist() == ["600001", "600002"]
+    assert provider.sector_members("Ste")["symbol"].tolist() == ["600001", "600002"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import os
 import time
 from typing import Protocol
@@ -139,6 +140,10 @@ class BaostockProvider:
     name: str = "baostock"
     _industry_cache: pd.DataFrame | None = field(default=None, init=False, repr=False)
 
+    def _sector_code(self, sector_name: str) -> str:
+        digest = hashlib.blake2b(str(sector_name).encode("utf-8"), digest_size=3).hexdigest().upper()
+        return f"BSI{digest}"
+
     def _bs(self):
         global _BAOSTOCK_LOGGED_IN
         try:
@@ -205,12 +210,35 @@ class BaostockProvider:
         if industry.empty:
             return pd.DataFrame(columns=["sector", "code"])
         out = industry.groupby("sector", as_index=False).size().rename(columns={"size": "stock_count"})
-        out["code"] = ""
+        out["code"] = out["sector"].map(self._sector_code)
         return out.sort_values("stock_count", ascending=False).reset_index(drop=True)
+
+    def _resolve_sector_name(self, sector_name: str, board_type: str = "industry") -> str:
+        key = str(sector_name).strip()
+        if not key:
+            return key
+        sectors = self.list_sectors(board_type)
+        if sectors.empty:
+            return key
+
+        code_match = sectors[sectors["code"].astype(str).str.upper().eq(key.upper())]
+        if not code_match.empty:
+            return str(code_match.iloc[0]["sector"])
+
+        exact_match = sectors[sectors["sector"].astype(str).eq(key)]
+        if not exact_match.empty:
+            return str(exact_match.iloc[0]["sector"])
+
+        keyword_match = sectors[sectors["sector"].astype(str).str.contains(key, case=False, regex=False, na=False)]
+        if not keyword_match.empty:
+            return str(keyword_match.iloc[0]["sector"])
+
+        return key
 
     def sector_members(self, sector_name: str, board_type: str = "industry") -> pd.DataFrame:
         industry = self._industry()
-        out = industry[industry["sector"].astype(str).eq(str(sector_name))].copy()
+        resolved = self._resolve_sector_name(sector_name, board_type)
+        out = industry[industry["sector"].astype(str).eq(str(resolved))].copy()
         return out[[c for c in ["symbol", "name"] if c in out.columns]].reset_index(drop=True)
 
     def sector_history(self, sector_name: str, start: str, end: str, board_type: str = "industry") -> pd.DataFrame:
