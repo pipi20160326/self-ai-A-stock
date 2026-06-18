@@ -28,6 +28,7 @@ from src.db import (
     save_report_to_db,
     set_monitor_active,
 )
+from src.etf_utils import diversify_etf_frame, infer_etf_theme
 from src.manual_score import score_sector_key, score_stock_code
 from src.monitor import run_monitor
 from src.reports import save_daily_scan
@@ -52,7 +53,7 @@ st.set_page_config(page_title="A股今日机会雷达", layout="wide")
 
 
 @st.cache_resource
-def service(cache_version: str = "baostock-linked-workflow-v4") -> MarketDataService:
+def service(cache_version: str = "baostock-linked-workflow-v5") -> MarketDataService:
     return MarketDataService(settings)
 
 
@@ -86,8 +87,10 @@ def load_etf_candidates(prefilter: int, limit: int) -> pd.DataFrame:
     etfs["score"] = 0.25 + etfs["pct_chg"].fillna(0) / 100
     if max_amount > 0 and "amount" in etfs.columns:
         etfs["score"] = etfs["score"] + etfs["amount"].fillna(0) / max_amount * 0.15
-    cols = [col for col in ["symbol", "name", "price", "pct_chg", "amount", "turnover", "score"] if col in etfs.columns]
-    return etfs[cols].head(limit).reset_index(drop=True)
+    etfs["theme"] = etfs["name"].map(infer_etf_theme) if "name" in etfs.columns else "其他"
+    etfs = diversify_etf_frame(etfs, limit, max_per_theme=2)
+    cols = [col for col in ["symbol", "name", "theme", "price", "pct_chg", "amount", "turnover", "score"] if col in etfs.columns]
+    return etfs[cols].reset_index(drop=True)
 
 
 def ymd(value: date) -> str:
@@ -161,12 +164,18 @@ def status_class(level: str) -> str:
 
 
 def set_selected_target(target_type: str, code: str, name: str = "", row: dict | None = None) -> None:
+    target_row = row or {}
     st.session_state["selected_target"] = {
         "type": target_type,
         "code": str(code),
         "name": name or str(code),
-        "row": row or {},
+        "row": target_row,
     }
+    if target_type == "sector":
+        st.session_state["selected_radar_sector"] = {
+            "code": str(code),
+            "name": name or str(target_row.get("sector", code)),
+        }
 
 
 def selected_target() -> dict:
@@ -453,16 +462,18 @@ def normalize_etf_rows(etfs: pd.DataFrame, limit: int = 5) -> list[dict]:
     if etfs is None or etfs.empty or "error" in etfs.columns:
         return []
     rows = []
-    ordered = etfs.copy()
+    ordered = diversify_etf_frame(etfs, limit, max_per_theme=2)
     if "score" in ordered.columns:
         ordered = ordered.sort_values("score", ascending=False)
     for _, row in ordered.head(limit).iterrows():
         score = row.get("score", 0)
+        theme = row.get("theme") or infer_etf_theme(row.get("name", ""))
         rows.append(
             {
                 "type": "etf",
                 "code": str(row.get("symbol", "")).zfill(6),
                 "name": str(row.get("name", "")),
+                "sector": str(theme),
                 "level": level_from_score(score),
                 "score": score,
                 "ret20": None,
@@ -499,7 +510,7 @@ def run_radar_scan(
 
     try:
         progress.progress(48, text="拉取板块成分并评分个股...")
-        scan = scan_safe(start, end, board_type, top_sectors, stocks_per_sector, member_limit=settings.daily_member_limit)
+        scan = scan_safe(start, end, board_type, top_sectors, max(stocks_per_sector, 6), member_limit=settings.daily_member_limit)
         if not scan.empty:
             save_daily_scan(scan, pd.to_datetime(end).strftime("%Y-%m-%d"))
     except Exception as exc:
@@ -520,6 +531,12 @@ def run_radar_scan(
     st.session_state["radar_etfs"] = etfs
     st.session_state["radar_errors"] = errors + scanner.data.warnings
     st.session_state["radar_elapsed"] = elapsed
+    if not ranked.empty and "sector" in ranked.columns:
+        sector_names = ranked["sector"].astype(str).tolist()
+        current = st.session_state.get("selected_radar_sector", {})
+        if not current or str(current.get("name", "")) not in sector_names:
+            first = ranked.iloc[0]
+            set_selected_target("sector", str(first.get("code", "") or first.get("sector", "")), str(first.get("sector", "")), first.to_dict())
     if errors and (not ranked.empty or not scan.empty or (not etfs.empty and "error" not in etfs.columns)):
         st.session_state["radar_status"] = "部分失败"
     elif errors:
@@ -542,6 +559,16 @@ def infer_search_type(text: str, selected: str) -> str:
 
 
 def render_candidate_list(title: str, note: str, rows: list[dict], empty_text: str, key_prefix: str) -> None:
+    if key_prefix == "stock":
+        selected_sector = st.session_state.get("selected_radar_sector", {})
+        sector_name = str(selected_sector.get("name", ""))
+        title = f"{sector_name} 强势股 Top 6" if sector_name else "板块强势股 Top 6"
+        note = "点击强势板块后，这里只展示该板块内候选；已过滤科创、30 开头、北交所和 ST。"
+        empty_text = "当前板块暂无个股候选，可重新扫描或调大每板块个股数。"
+    elif key_prefix == "etf":
+        title = f"多方向 ETF Top {len(rows) if rows else 0}"
+        note = "全市场独立筛选，同一主题默认最多展示 2 只，避免同一板块 ETF 刷屏。"
+        empty_text = "暂无 ETF 候选。"
     st.markdown(f"#### {title}")
     st.caption(note)
     if not rows:
@@ -563,6 +590,8 @@ def render_candidate_list(title: str, note: str, rows: list[dict], empty_text: s
         c1, c2 = st.columns(2)
         if c1.button("详情", key=f"{key_prefix}_detail_{idx}_{item['code']}", use_container_width=True):
             set_selected_target(item["type"], item["code"], item["name"], item["row"])
+            if item["type"] == "sector":
+                st.rerun()
         if c2.button("收藏", key=f"{key_prefix}_fav_{idx}_{item['code']}", use_container_width=True):
             favorites = st.session_state.setdefault("favorites", [])
             favorite_id = f"{item['type']}:{item['code']}"
@@ -682,8 +711,16 @@ def render_radar_workspace(data: MarketDataService, scanner: TrendScanner, board
                     st.error(f"临时评分失败：{exc}")
 
     sector_rows = normalize_sector_rows(ranked, 3)
-    stock_rows = normalize_stock_rows(scan, 6)
-    etf_rows = normalize_etf_rows(etfs, 5)
+    selected_sector = st.session_state.get("selected_radar_sector", {})
+    selected_sector_name = str(selected_sector.get("name", ""))
+    if not selected_sector_name and sector_rows:
+        selected_sector_name = sector_rows[0]["name"]
+    stock_source = scan
+    if selected_sector_name and isinstance(scan, pd.DataFrame) and not scan.empty and "sector" in scan.columns:
+        scoped = scan[scan["sector"].astype(str).eq(selected_sector_name)].copy()
+        stock_source = scoped
+    stock_rows = normalize_stock_rows(stock_source, 6)
+    etf_rows = normalize_etf_rows(etfs, top_etfs)
 
     left, right = st.columns([2.1, 1])
     with left:

@@ -11,6 +11,7 @@ import pandas as pd
 from src.config import ROOT_DIR, settings
 from src.data import MarketDataService
 from src.data.providers import retry_call
+from src.etf_utils import diversify_etf_rows, infer_etf_theme
 from src.strategy.sector import market_is_healthy, score_sector
 from src.strategy.stock import score_stock
 
@@ -163,6 +164,7 @@ def _load_etf_candidates(data: MarketDataService, start: str, end: str, prefilte
             {
                 "symbol": symbol,
                 "name": item.get("name", ""),
+                "theme": infer_etf_theme(item.get("name", "")),
                 "today_pct": pct_chg,
                 "amount": amount or 0,
                 "score": score,
@@ -173,7 +175,7 @@ def _load_etf_candidates(data: MarketDataService, start: str, end: str, prefilte
                 "reason": reason,
             }
         )
-    return sorted(rows, key=lambda x: x["score"], reverse=True)[:limit]
+    return diversify_etf_rows(rows, limit, max_per_theme=2)
 
 
 def build_report(
