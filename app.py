@@ -12,10 +12,9 @@ from src.config import settings
 from src.daily_job import run_daily
 from src.data import MarketDataService
 from src.data.providers import normalize_code, retry_call
+import src.db as db_api
 from src.db import (
     add_monitor_target,
-    delete_report,
-    fetch_database_overview,
     fetch_monitor_events,
     fetch_monitor_targets,
     fetch_recent_reports,
@@ -194,6 +193,48 @@ def render_score_summary(scored: dict) -> None:
     cols[3].metric("60日", pct(scored.get("ret60")))
     cols[4].metric("收盘", num(scored.get("close")))
     st.write(scored.get("reason", ""))
+
+
+def get_database_overview() -> dict[str, int | str | None]:
+    if hasattr(db_api, "fetch_database_overview"):
+        return db_api.fetch_database_overview()
+    init_database()
+    with db_api.mysql_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    count(*) as report_count,
+                    min(report_date) as first_report_date,
+                    max(report_date) as latest_report_date,
+                    coalesce(sum(sector_count), 0) as sector_rows,
+                    coalesce(sum(stock_count), 0) as stock_rows,
+                    coalesce(sum(etf_count), 0) as etf_rows
+                from reports
+                """
+            )
+            row = cur.fetchone() or {}
+            cur.execute("select count(*) as event_count from monitor_events")
+            events = cur.fetchone() or {}
+    return {
+        "report_count": int(row.get("report_count") or 0),
+        "first_report_date": str(row.get("first_report_date")) if row.get("first_report_date") else None,
+        "latest_report_date": str(row.get("latest_report_date")) if row.get("latest_report_date") else None,
+        "sector_rows": int(row.get("sector_rows") or 0),
+        "stock_rows": int(row.get("stock_rows") or 0),
+        "etf_rows": int(row.get("etf_rows") or 0),
+        "monitor_event_count": int(events.get("event_count") or 0),
+    }
+
+
+def remove_report(report_id: int) -> None:
+    if hasattr(db_api, "delete_report"):
+        db_api.delete_report(report_id)
+        return
+    init_database()
+    with db_api.mysql_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from reports where id=%s", (report_id,))
 
 
 def load_workspace_for_date(
@@ -476,7 +517,7 @@ with tabs[1]:
 
     try:
         init_database()
-        overview = fetch_database_overview()
+        overview = get_database_overview()
         reports = fetch_recent_reports(60)
     except Exception as exc:
         overview = {}
@@ -504,14 +545,14 @@ with tabs[1]:
         del1, del2 = st.columns(2)
         if del1.button("删除选中报告", key="delete_selected_report"):
             try:
-                delete_report(selected_id)
+                remove_report(selected_id)
                 st.success("已删除选中报告。")
                 st.rerun()
             except Exception as exc:
                 st.error(f"删除失败：{exc}")
         if del2.button("删除并重新生成所选日期", key="delete_regenerate_report"):
             try:
-                delete_report(selected_id)
+                remove_report(selected_id)
                 generated_path = run_daily(selected_report_date, force=True, notify_enabled=True)
                 st.success(f"已删除并重新生成：{generated_path}")
                 st.rerun()
@@ -700,7 +741,7 @@ with tabs[3]:
     st.markdown("#### 数据状态")
     cache_stats = data.cache.stats()
     try:
-        overview = fetch_database_overview()
+        overview = get_database_overview()
     except Exception as exc:
         overview = {}
         st.info(f"MySQL 状态暂不可用：{exc}")
