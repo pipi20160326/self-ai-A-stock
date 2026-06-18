@@ -38,7 +38,7 @@ st.set_page_config(page_title="A股板块趋势工作台", layout="wide")
 
 
 @st.cache_resource
-def service() -> MarketDataService:
+def service(cache_version: str = "baostock-linked-workflow-v2") -> MarketDataService:
     return MarketDataService(settings)
 
 
@@ -194,7 +194,7 @@ def render_score_summary(scored: dict) -> None:
     st.write(scored.get("reason", ""))
 
 
-data = service()
+data = service("baostock-linked-workflow-v2")
 scanner = TrendScanner(data, settings)
 
 st.title("A股板块趋势工作台")

@@ -26,7 +26,6 @@ python -m src.cli update-data
 ```powershell
 $env:DATA_PROVIDER="auto"
 $env:TUSHARE_TOKEN=""
-$env:BAOSTOCK_SECTOR_MEMBER_LIMIT="30"
 $env:SCAN_TOP_SECTORS="5"
 $env:SCAN_TOP_STOCKS_PER_SECTOR="3"
 $env:MARKET_FILTER="true"
@@ -35,6 +34,10 @@ $env:INITIAL_CASH="1000000"
 $env:DATA_REQUEST_TIMEOUT="15"
 $env:DATA_RETRY_ATTEMPTS="2"
 $env:DATA_RETRY_DELAY="1"
+$env:BAOSTOCK_SECTOR_MEMBER_LIMIT="8"
+$env:BAOSTOCK_SECTOR_PREFILTER="12"
+$env:BAOSTOCK_SCAN_MEMBER_LIMIT="20"
+$env:BAOSTOCK_REPORT_PREFILTER="12"
 $env:DAILY_PREFILTER="40"
 $env:DAILY_TOP_SECTORS="12"
 $env:DAILY_STOCKS_PER_SECTOR="3"
@@ -51,6 +54,16 @@ $env:DAILY_REFRESH="false"
 - `data/cache/market_cache.sqlite3`：本地 SQLite 缓存。
 - `reports/daily/YYYY-MM-DD_scan.csv`：每日扫描清单。
 - `reports/backtest/`：历史兼容目录；当前页面已停用回测，避免长时间阻塞。
+
+## BaoStock 本地预热
+
+BaoStock 的 K 线接口更稳定，但实时扫描强势板块时仍可能需要拉多只成分股日线。建议收盘数据更新后预热本地缓存，并生成当天工作台扫描结果：
+
+```powershell
+python -m src.cli update-data --warm-workspace --end 20260618
+```
+
+默认预热 Top 板块和每个板块前 `BAOSTOCK_SCAN_MEMBER_LIMIT` 只成分股。预热完成后，页面再次查询会优先命中 `data/cache/market_cache.sqlite3`，速度会明显快于实时逐只拉取。定时任务默认按 18:00 执行，先预热工作台缓存，再生成日报。
 
 ## MySQL 历史报告与定时任务
 
@@ -76,9 +89,9 @@ python -m src.daily_job --date 2026-06-16 --html 2026-06-16-report.html --no-not
 python -m src.daily_job
 ```
 
-每天建议在 A 股收盘后执行，默认脚本按 16:00 设计。脚本会自动判断交易日，周六日和节假日跳过。
+每天建议在 A 股收盘后执行，默认脚本按 18:00 设计。脚本会自动判断交易日，周六日和节假日跳过。
 
-安装每天 16:00 自动任务需要管理员权限：
+安装每天 18:00 自动任务需要管理员权限：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup_daily_task.ps1

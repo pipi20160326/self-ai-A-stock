@@ -66,6 +66,7 @@ class TrendScanner:
         board_type: str = "industry",
         top_sectors: int | None = None,
         stocks_per_sector: int | None = None,
+        member_limit: int | None = None,
     ) -> pd.DataFrame:
         start = start or self.config.start_date
         end = end or date.today().strftime("%Y%m%d")
@@ -83,7 +84,11 @@ class TrendScanner:
                 rows.append({"sector": sector, "signal": "观察", "reason": f"成分股失败: {exc}"})
                 continue
             candidates = []
-            for _, member in members.iterrows():
+            provider_name = getattr(getattr(self.data, "provider", None), "name", "")
+            if member_limit is None and provider_name == "baostock":
+                member_limit = int(os.getenv("BAOSTOCK_SCAN_MEMBER_LIMIT", str(self.config.daily_member_limit)))
+            scoped_members = members.head(member_limit) if member_limit else members
+            for _, member in scoped_members.iterrows():
                 raw_symbol = str(member.get("symbol", "")).strip()
                 if not raw_symbol:
                     continue

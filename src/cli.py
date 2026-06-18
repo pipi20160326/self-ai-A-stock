@@ -33,8 +33,35 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 def cmd_update_data(args: argparse.Namespace) -> None:
     service = MarketDataService(settings)
+    start = args.start or settings.start_date
+    end = args.end or date.today().strftime("%Y%m%d")
     service.list_sectors(args.board_type, refresh=True)
-    service.benchmark_history(settings.benchmark_symbol, args.start or settings.start_date, args.end or date.today().strftime("%Y%m%d"), refresh=True)
+    service.benchmark_history(settings.benchmark_symbol, start, end, refresh=True)
+    if args.warm_workspace:
+        scanner = TrendScanner(service, settings)
+        ranked = scanner.rank_sectors(start, end, args.board_type, args.top_sectors)
+        print(f"预热板块: {len(ranked)}")
+        for _, sector_row in ranked.iterrows():
+            sector = str(sector_row["sector"])
+            try:
+                members = service.sector_members(sector, args.board_type, refresh=True)
+            except Exception as exc:
+                print(f"- {sector} 成分股失败: {exc}")
+                continue
+            warmed = 0
+            for _, member in members.head(args.member_limit).iterrows():
+                symbol = str(member.get("symbol", "")).strip().zfill(6)
+                if not symbol:
+                    continue
+                try:
+                    service.stock_history(symbol, start, end, refresh=True)
+                    warmed += 1
+                except Exception as exc:
+                    print(f"  {symbol} K线失败: {exc}")
+            print(f"- {sector}: 已预热 {warmed} 只")
+        scan = scanner.scan(start, end, args.board_type, args.top_sectors, args.stocks_per_sector, member_limit=args.member_limit)
+        path = save_daily_scan(scan, pd.to_datetime(end).strftime("%Y-%m-%d"))
+        print(f"工作台扫描已生成: {path}")
     print("基础数据缓存已更新。")
 
 
@@ -73,6 +100,10 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--start")
     update.add_argument("--end")
     update.add_argument("--board-type", choices=["industry", "concept"], default="industry")
+    update.add_argument("--warm-workspace", action="store_true", help="预热工作台所需板块、成分股K线并生成扫描CSV")
+    update.add_argument("--top-sectors", type=int, default=settings.scan_top_sectors)
+    update.add_argument("--stocks-per-sector", type=int, default=settings.scan_top_stocks_per_sector)
+    update.add_argument("--member-limit", type=int, default=settings.daily_member_limit)
     update.set_defaults(func=cmd_update_data)
 
     score = sub.add_parser("score")
