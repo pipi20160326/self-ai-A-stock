@@ -56,6 +56,8 @@ def test_cache_is_isolated_by_provider_name(tmp_path) -> None:
 
 def test_baostock_sector_has_local_code_and_resolves_search_key() -> None:
     provider = BaostockProvider()
+    provider._board_list_from_ak = lambda board_type="industry": pd.DataFrame()
+    provider._board_members_from_ak = lambda sector_name, board_type="industry": pd.DataFrame(columns=["symbol", "name"])
     provider._industry_cache = pd.DataFrame(
         [
             {"symbol": "600001", "name": "A", "sector": "Steel", "classification": "industry"},
@@ -70,3 +72,16 @@ def test_baostock_sector_has_local_code_and_resolves_search_key() -> None:
     assert steel_code.startswith("BSI")
     assert provider.sector_members(steel_code)["symbol"].tolist() == ["600001", "600002"]
     assert provider.sector_members("Ste")["symbol"].tolist() == ["600001", "600002"]
+
+
+def test_baostock_resolves_real_board_code_and_keyword() -> None:
+    provider = BaostockProvider()
+    provider._board_list_from_ak = lambda board_type="industry": pd.DataFrame(
+        [
+            {"sector": "证券", "code": "BK0473", "pct_chg": 1.2},
+            {"sector": "机器人概念", "code": "BK1100", "pct_chg": 0.8},
+        ]
+    )
+
+    assert provider._resolve_sector_name("BK0473") == "证券"
+    assert provider._resolve_sector_name("机器人") == "机器人概念"

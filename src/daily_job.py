@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -57,10 +57,11 @@ def run_daily(report_date: date, force: bool = False, notify_enabled: bool = Tru
     init_database()
     ymd = report_date.strftime("%Y%m%d")
     iso = report_date.strftime("%Y-%m-%d")
+    report_start = (report_date - timedelta(days=settings.daily_lookback_days)).strftime("%Y%m%d")
     output = ROOT_DIR / f"{iso}-report.html"
     path = build_report(
         report_date=ymd,
-        start=settings.start_date,
+        start=report_start,
         board_type="industry",
         prefilter=settings.daily_prefilter,
         top_sectors=settings.daily_top_sectors,

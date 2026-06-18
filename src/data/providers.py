@@ -53,9 +53,13 @@ def normalize_price_frame(frame: pd.DataFrame) -> pd.DataFrame:
     rename_map = {
         "\u65e5\u671f": "date",
         "\u5f00\u76d8": "open",
+        "\u5f00\u76d8\u4ef7": "open",
         "\u6536\u76d8": "close",
+        "\u6536\u76d8\u4ef7": "close",
         "\u6700\u9ad8": "high",
+        "\u6700\u9ad8\u4ef7": "high",
         "\u6700\u4f4e": "low",
+        "\u6700\u4f4e\u4ef7": "low",
         "\u6210\u4ea4\u91cf": "volume",
         "\u6210\u4ea4\u989d": "amount",
         "\u6362\u624b\u7387": "turnover",
@@ -140,9 +144,108 @@ class BaostockProvider:
     name: str = "baostock"
     _industry_cache: pd.DataFrame | None = field(default=None, init=False, repr=False)
 
+    def _ak(self):
+        install_requests_timeout()
+        try:
+            import akshare as ak
+        except ImportError as exc:
+            raise RuntimeError("AkShare is not installed. Run pip install -r requirements.txt.") from exc
+        return ak
+
     def _sector_code(self, sector_name: str) -> str:
         digest = hashlib.blake2b(str(sector_name).encode("utf-8"), digest_size=3).hexdigest().upper()
         return f"BSI{digest}"
+
+    def _board_list_from_ak(self, board_type: str = "industry") -> pd.DataFrame:
+        ak = self._ak()
+        loader = ak.stock_board_industry_name_em if board_type == "industry" else ak.stock_board_concept_name_em
+        try:
+            raw = retry_call(loader)
+        except Exception:
+            backup = ak.stock_board_industry_name_ths if board_type == "industry" else ak.stock_board_concept_name_ths
+            raw = retry_call(backup)
+        if raw.empty:
+            return pd.DataFrame(columns=["sector", "code"])
+        out = raw.rename(
+            columns={
+                "板块名称": "sector",
+                "板块代码": "code",
+                "name": "sector",
+                "code": "code",
+                "涨跌幅": "pct_chg",
+                "总市值": "market_value",
+                "换手率": "turnover",
+                "上涨家数": "up_count",
+                "下跌家数": "down_count",
+            }
+        ).copy()
+        if "sector" not in out.columns:
+            return pd.DataFrame(columns=["sector", "code"])
+        if "code" not in out.columns:
+            out["code"] = out["sector"].map(self._sector_code)
+        for col in ["pct_chg", "market_value", "turnover", "up_count", "down_count"]:
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce")
+        keep = [c for c in ["sector", "code", "pct_chg", "market_value", "turnover", "up_count", "down_count"] if c in out.columns]
+        return out[keep].dropna(subset=["sector"]).reset_index(drop=True)
+
+    def _board_history_from_ak(self, sector_name: str, start: str, end: str, board_type: str = "industry") -> pd.DataFrame:
+        ak = self._ak()
+        symbol = self._resolve_sector_name(sector_name, board_type)
+        if board_type == "industry":
+            try:
+                raw = retry_call(
+                    lambda: ak.stock_board_industry_hist_em(
+                        symbol=symbol,
+                        start_date=str(start),
+                        end_date=str(end),
+                        period="日k",
+                        adjust="",
+                    )
+                )
+            except Exception:
+                raw = retry_call(
+                    lambda: ak.stock_board_industry_index_ths(
+                        symbol=symbol,
+                        start_date=str(start),
+                        end_date=str(end),
+                    )
+                )
+        else:
+            try:
+                raw = retry_call(
+                    lambda: ak.stock_board_concept_hist_em(
+                        symbol=symbol,
+                        start_date=str(start),
+                        end_date=str(end),
+                        period="daily",
+                        adjust="",
+                    )
+                )
+            except Exception:
+                raw = retry_call(
+                    lambda: ak.stock_board_concept_index_ths(
+                        symbol=symbol,
+                        start_date=str(start),
+                        end_date=str(end),
+                    )
+                )
+        return normalize_price_frame(raw)
+
+    def _board_members_from_ak(self, sector_name: str, board_type: str = "industry") -> pd.DataFrame:
+        ak = self._ak()
+        symbol = self._resolve_sector_name(sector_name, board_type)
+        loader = ak.stock_board_industry_cons_em if board_type == "industry" else ak.stock_board_concept_cons_em
+        raw = retry_call(lambda: loader(symbol=symbol))
+        if raw.empty:
+            return pd.DataFrame(columns=["symbol", "name"])
+        out = raw.rename(columns={"代码": "symbol", "名称": "name"}).copy()
+        if "symbol" not in out.columns:
+            return pd.DataFrame(columns=["symbol", "name"])
+        if "name" not in out.columns:
+            out["name"] = ""
+        out["symbol"] = out["symbol"].map(normalize_code)
+        return out[["symbol", "name"]].dropna(subset=["symbol"]).reset_index(drop=True)
 
     def _bs(self):
         global _BAOSTOCK_LOGGED_IN
@@ -206,6 +309,14 @@ class BaostockProvider:
         return self._industry_cache.copy()
 
     def list_sectors(self, board_type: str = "industry") -> pd.DataFrame:
+        try:
+            boards = self._board_list_from_ak(board_type)
+            if not boards.empty:
+                return boards
+        except Exception:
+            if board_type != "industry":
+                return pd.DataFrame(columns=["sector", "code"])
+
         industry = self._industry()
         if industry.empty:
             return pd.DataFrame(columns=["sector", "code"])
@@ -236,12 +347,28 @@ class BaostockProvider:
         return key
 
     def sector_members(self, sector_name: str, board_type: str = "industry") -> pd.DataFrame:
+        try:
+            members = self._board_members_from_ak(sector_name, board_type)
+            if not members.empty:
+                return members
+        except Exception:
+            if board_type != "industry":
+                return pd.DataFrame(columns=["symbol", "name"])
+
         industry = self._industry()
         resolved = self._resolve_sector_name(sector_name, board_type)
         out = industry[industry["sector"].astype(str).eq(str(resolved))].copy()
         return out[[c for c in ["symbol", "name"] if c in out.columns]].reset_index(drop=True)
 
     def sector_history(self, sector_name: str, start: str, end: str, board_type: str = "industry") -> pd.DataFrame:
+        try:
+            hist = self._board_history_from_ak(sector_name, start, end, board_type)
+            if not hist.empty:
+                return hist
+        except Exception:
+            if board_type != "industry":
+                raise
+
         members = self.sector_members(sector_name, board_type)
         if members.empty:
             raise RuntimeError(f"No Baostock members found for sector: {sector_name}")

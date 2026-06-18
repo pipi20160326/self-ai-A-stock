@@ -62,19 +62,19 @@ class MarketDataService:
         raise RuntimeError(f"数据刷新结果为空且无可用缓存: {'/'.join(key)}")
 
     def list_sectors(self, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = self._key("sectors", board_type)
+        key = self._key("sectors_v2", board_type)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.list_sectors(board_type))
         return self._cached(key, lambda: self.provider.list_sectors(board_type))
 
     def sector_history(self, sector: str, start: str, end: str, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = self._key("sector_history", board_type, sector, start, end)
+        key = self._key("sector_history_v2", board_type, sector, start, end)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.sector_history(sector, start, end, board_type))
         return self._cached(key, lambda: self.provider.sector_history(sector, start, end, board_type))
 
     def sector_members(self, sector: str, board_type: str = "industry", refresh: bool = False) -> pd.DataFrame:
-        key = self._key("sector_members", board_type, sector)
+        key = self._key("sector_members_v2", board_type, sector)
         if refresh:
             return self._refresh_or_cached(key, lambda: self.provider.sector_members(sector, board_type))
         return self._cached(key, lambda: self.provider.sector_members(sector, board_type))

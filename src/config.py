@@ -57,6 +57,7 @@ class Settings:
     max_stocks_per_sector: int = int(os.getenv("MAX_STOCKS_PER_SECTOR", "3"))
     benchmark_symbol: str = os.getenv("BENCHMARK_SYMBOL", "000300")
     daily_prefilter: int = int(os.getenv("DAILY_PREFILTER", "40"))
+    daily_lookback_days: int = int(os.getenv("DAILY_LOOKBACK_DAYS", "240"))
     daily_top_sectors: int = int(os.getenv("DAILY_TOP_SECTORS", "12"))
     daily_stocks_per_sector: int = int(os.getenv("DAILY_STOCKS_PER_SECTOR", "3"))
     daily_member_limit: int = int(os.getenv("DAILY_MEMBER_LIMIT", "20"))

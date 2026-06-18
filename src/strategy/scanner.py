@@ -46,6 +46,8 @@ class TrendScanner:
         refresh: bool = False,
     ) -> pd.DataFrame:
         sectors = self.data.list_sectors(board_type, refresh=refresh)
+        if sectors.empty:
+            return pd.DataFrame(columns=["sector", "code", "score", "reason"])
         provider_name = getattr(getattr(self.data, "provider", None), "name", "")
         if provider_name == "baostock":
             default_prefilter = max((limit or self.config.scan_top_sectors) * 3, 12)
