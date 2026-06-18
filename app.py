@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import importlib
 from pathlib import Path
 
 import pandas as pd
@@ -10,9 +11,10 @@ import streamlit.components.v1 as components
 
 from src.config import settings
 from src.daily_job import run_daily
-from src.data import MarketDataService
-from src.data.providers import normalize_code, retry_call
+import src.data.providers as data_providers_module
+import src.data.service as data_service_module
 import src.db as db_api
+import src.strategy.scanner as scanner_module
 from src.db import (
     add_monitor_target,
     fetch_monitor_events,
@@ -26,10 +28,19 @@ from src.db import (
     set_monitor_active,
 )
 from src.manual_score import score_sector_key, score_stock_code
-from src.monitor import run_monitor, score_etf
+from src.monitor import run_monitor
 from src.reports import save_daily_scan
-from src.strategy import TrendScanner
 from src.strategy.indicators import with_indicators
+from src.strategy.stock import score_stock
+
+
+data_providers_module = importlib.reload(data_providers_module)
+data_service_module = importlib.reload(data_service_module)
+scanner_module = importlib.reload(scanner_module)
+MarketDataService = data_service_module.MarketDataService
+TrendScanner = scanner_module.TrendScanner
+normalize_code = data_providers_module.normalize_code
+retry_call = data_providers_module.retry_call
 
 
 MA_OPTIONS = ["MA5", "MA10", "MA20", "MA60"]
@@ -39,7 +50,7 @@ st.set_page_config(page_title="A股板块趋势工作台", layout="wide")
 
 
 @st.cache_resource
-def service(cache_version: str = "baostock-linked-workflow-v2") -> MarketDataService:
+def service(cache_version: str = "baostock-linked-workflow-v3") -> MarketDataService:
     return MarketDataService(settings)
 
 
@@ -237,6 +248,82 @@ def remove_report(report_id: int) -> None:
             cur.execute("delete from reports where id=%s", (report_id,))
 
 
+def rank_sectors_safe(start: str, end: str, board_type: str, limit: int, refresh: bool = False) -> pd.DataFrame:
+    try:
+        return scanner.rank_sectors(start, end, board_type, limit, refresh=refresh)
+    except TypeError as exc:
+        if "refresh" not in str(exc):
+            raise
+        return scanner.rank_sectors(start, end, board_type, limit)
+
+
+def scan_safe(
+    start: str,
+    end: str,
+    board_type: str,
+    top_sectors: int,
+    stocks_per_sector: int,
+    member_limit: int | None = None,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    try:
+        return scanner.scan(
+            start,
+            end,
+            board_type,
+            top_sectors,
+            stocks_per_sector,
+            member_limit=member_limit,
+            refresh=refresh,
+        )
+    except TypeError as exc:
+        message = str(exc)
+        if "refresh" not in message and "member_limit" not in message:
+            raise
+        return scanner.scan(start, end, board_type, top_sectors, stocks_per_sector)
+
+
+def stock_history_safe(symbol: str, start: str, end: str, refresh: bool = False) -> pd.DataFrame:
+    try:
+        return data.stock_history(symbol, start, end, refresh=refresh)
+    except TypeError as exc:
+        if "refresh" not in str(exc):
+            raise
+        return data.stock_history(symbol, start, end)
+
+
+def etf_history_safe(symbol: str, start: str, end: str, refresh: bool = False) -> pd.DataFrame:
+    if hasattr(data, "etf_history"):
+        try:
+            return data.etf_history(symbol, start, end, refresh=refresh)
+        except TypeError as exc:
+            if "refresh" not in str(exc):
+                raise
+            return data.etf_history(symbol, start, end)
+    provider = getattr(data, "provider", None)
+    if provider is not None and hasattr(provider, "etf_history"):
+        return provider.etf_history(symbol, start, end)
+    fresh = MarketDataService(settings)
+    return fresh.etf_history(symbol, start, end, refresh=refresh)
+
+
+def score_etf_safe(symbol: str, start: str, end: str) -> tuple[dict, pd.DataFrame]:
+    history = etf_history_safe(symbol, start, end)
+    return score_stock(history, 0.0), history
+
+
+def stock_fund_flow_safe(symbol: str) -> pd.DataFrame:
+    if hasattr(data, "stock_fund_flow"):
+        return data.stock_fund_flow(symbol)
+    return pd.DataFrame()
+
+
+def sector_fund_flow_safe(sector: str, board_type: str) -> pd.DataFrame:
+    if hasattr(data, "sector_fund_flow"):
+        return data.sector_fund_flow(sector, board_type)
+    return pd.DataFrame()
+
+
 def load_workspace_for_date(
     scan_date: date,
     board_type: str,
@@ -246,11 +333,11 @@ def load_workspace_for_date(
 ) -> None:
     start = ymd(st.session_state["start_date"])
     end = ymd(scan_date)
-    ranked = scanner.rank_sectors(start, end, board_type, top_sectors, refresh=force_refresh)
+    ranked = rank_sectors_safe(start, end, board_type, top_sectors, refresh=force_refresh)
     st.session_state["ranked"] = ranked
     if not ranked.empty:
         set_selected_sector(str(ranked.iloc[0]["sector"]), str(ranked.iloc[0].get("code", "")))
-    scan = scanner.scan(
+    scan = scan_safe(
         start,
         end,
         board_type,
@@ -265,7 +352,7 @@ def load_workspace_for_date(
         save_daily_scan(scan, scan_date.strftime("%Y-%m-%d"))
 
 
-data = service("baostock-linked-workflow-v2")
+data = service("baostock-linked-workflow-v3")
 scanner = TrendScanner(data, settings)
 
 st.title("A股板块趋势工作台")
@@ -307,7 +394,7 @@ with tabs[0]:
     elif refresh_rank:
         with st.spinner("正在计算强势板块..."):
             try:
-                ranked = scanner.rank_sectors(ymd(start_date), ymd(end_date), board_type, top_sectors)
+                ranked = rank_sectors_safe(ymd(start_date), ymd(end_date), board_type, top_sectors)
                 st.session_state["ranked"] = ranked
                 st.session_state["workspace_loaded_date"] = end_date.strftime("%Y-%m-%d")
                 if not ranked.empty:
@@ -338,7 +425,7 @@ with tabs[0]:
             set_selected_sector(str(selected["sector"]), str(selected.get("code", "")))
         selected_sector = st.session_state.get("selected_sector", str(ranked.iloc[0]["sector"]))
         st.success(f"当前板块：{selected_sector}")
-        render_fund_flow(data.sector_fund_flow(selected_sector, board_type), "板块资金流")
+        render_fund_flow(sector_fund_flow_safe(selected_sector, board_type), "板块资金流")
     else:
         selected_sector = ""
         st.info("点击“刷新工作台”开始。")
@@ -393,9 +480,9 @@ with tabs[0]:
         st.markdown("### 3. 查看强势股走势")
         with st.spinner(f"正在加载 {selected_stock} 行情..."):
             try:
-                stock_hist = data.stock_history(selected_stock, ymd(start_date), ymd(end_date))
+                stock_hist = stock_history_safe(selected_stock, ymd(start_date), ymd(end_date))
                 render_price_detail(f"{selected_stock} {st.session_state.get('selected_stock_name', '')}", stock_hist, "workspace_stock")
-                render_fund_flow(data.stock_fund_flow(selected_stock), "个股资金流")
+                render_fund_flow(stock_fund_flow_safe(selected_stock), "个股资金流")
             except Exception as exc:
                 st.error(f"个股详情失败：{exc}")
 
@@ -428,7 +515,7 @@ with tabs[0]:
     if selected_etf:
         with st.spinner(f"正在加载 ETF {selected_etf} 行情..."):
             try:
-                etf_hist = data.etf_history(selected_etf, ymd(start_date), ymd(end_date))
+                etf_hist = etf_history_safe(selected_etf, ymd(start_date), ymd(end_date))
                 render_price_detail(f"ETF {selected_etf} {st.session_state.get('selected_etf_name', '')}", etf_hist, "workspace_etf")
             except Exception as exc:
                 st.error(f"ETF 详情失败：{exc}")
@@ -464,12 +551,12 @@ with tabs[0]:
                 try:
                     if score_kind == "stock":
                         scored, hist = score_stock_code(data, code.strip(), ymd(start_date), ymd(end_date))
-                        flow = data.stock_fund_flow(code.strip())
+                        flow = stock_fund_flow_safe(code.strip())
                     elif score_kind == "sector":
                         scored, hist = score_sector_key(data, code.strip(), ymd(start_date), ymd(end_date), board_type, settings)
-                        flow = data.sector_fund_flow(code.strip(), board_type)
+                        flow = sector_fund_flow_safe(code.strip(), board_type)
                     else:
-                        scored, hist = score_etf(code.strip(), ymd(start_date), ymd(end_date), data)
+                        scored, hist = score_etf_safe(code.strip(), ymd(start_date), ymd(end_date))
                         flow = pd.DataFrame()
                     render_score_summary(scored)
                     render_price_detail(code.strip(), hist, f"manual_{score_kind}")
