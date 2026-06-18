@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 import importlib
 from pathlib import Path
+import time
+from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,7 +15,6 @@ from src.config import settings
 from src.daily_job import run_daily
 import src.data.providers as data_providers_module
 import src.data.service as data_service_module
-import src.db as db_api
 import src.strategy.scanner as scanner_module
 from src.db import (
     add_monitor_target,
@@ -44,13 +45,14 @@ retry_call = data_providers_module.retry_call
 
 
 MA_OPTIONS = ["MA5", "MA10", "MA20", "MA60"]
+STANCE_ORDER = {"强": 0, "中": 1, "观察": 2}
 
 
-st.set_page_config(page_title="A股板块趋势工作台", layout="wide")
+st.set_page_config(page_title="A股今日机会雷达", layout="wide")
 
 
 @st.cache_resource
-def service(cache_version: str = "baostock-linked-workflow-v3") -> MarketDataService:
+def service(cache_version: str = "baostock-linked-workflow-v4") -> MarketDataService:
     return MarketDataService(settings)
 
 
@@ -88,11 +90,11 @@ def load_etf_candidates(prefilter: int, limit: int) -> pd.DataFrame:
     return etfs[cols].head(limit).reset_index(drop=True)
 
 
-def ymd(value) -> str:
+def ymd(value: date) -> str:
     return value.strftime("%Y%m%d")
 
 
-def pct(value) -> str:
+def pct(value: Any) -> str:
     try:
         if value is None or pd.isna(value):
             return "-"
@@ -101,7 +103,16 @@ def pct(value) -> str:
         return "-"
 
 
-def num(value, digits: int = 2) -> str:
+def raw_pct(value: Any) -> str:
+    try:
+        if value is None or pd.isna(value):
+            return "-"
+        return f"{float(value):.2f}%"
+    except Exception:
+        return "-"
+
+
+def num(value: Any, digits: int = 2) -> str:
     try:
         if value is None or pd.isna(value):
             return "-"
@@ -120,16 +131,53 @@ def selected_row_index(event) -> int | None:
     return int(rows[0])
 
 
-def set_selected_sector(sector: str, code: str = "") -> None:
-    if st.session_state.get("selected_sector") != sector:
-        st.session_state.pop("selected_stock", None)
-        st.session_state.pop("selected_stock_name", None)
-    st.session_state["selected_sector"] = sector
-    st.session_state["selected_sector_code"] = code
+def level_from_score(score: Any, signal: str = "") -> str:
+    try:
+        score_value = float(score)
+    except Exception:
+        score_value = 0.0
+    if signal == "卖出":
+        return "观察"
+    if score_value >= 0.6:
+        return "强"
+    if score_value >= 0.2:
+        return "中"
+    return "观察"
 
 
-def render_price_chart(detail: pd.DataFrame, key: str, height: int = 540) -> None:
-    selected_mas = st.multiselect("均线", MA_OPTIONS, default=MA_OPTIONS, key=f"{key}_mas")
+def level_from_stance(value: Any, score: Any = 0, signal: str = "") -> str:
+    text = str(value or "")
+    if "强势" in text or text == "强":
+        return "强"
+    if "一般" in text or text == "中":
+        return "中"
+    if "观察" in text:
+        return "观察"
+    return level_from_score(score, signal)
+
+
+def status_class(level: str) -> str:
+    return {"强": "strong", "中": "mid", "观察": "watch"}.get(level, "watch")
+
+
+def set_selected_target(target_type: str, code: str, name: str = "", row: dict | None = None) -> None:
+    st.session_state["selected_target"] = {
+        "type": target_type,
+        "code": str(code),
+        "name": name or str(code),
+        "row": row or {},
+    }
+
+
+def selected_target() -> dict:
+    return st.session_state.get(
+        "selected_target",
+        {"type": "sector", "code": "", "name": "暂无选择", "row": {}},
+    )
+
+
+def render_price_chart(detail: pd.DataFrame, key: str, height: int = 430) -> None:
+    selected_mas = st.multiselect("均线", MA_OPTIONS, default=["MA20", "MA60"], key=f"{key}_mas")
     fig = go.Figure()
     fig.add_trace(
         go.Candlestick(
@@ -156,14 +204,24 @@ def render_price_detail(title: str, history: pd.DataFrame, key: str) -> None:
         return
     detail = with_indicators(history)
     latest = detail.iloc[-1]
-    st.markdown(f"#### {title}")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("最新收盘", num(latest.get("close")))
     c2.metric("20日收益", pct(latest.get("ret20")))
     c3.metric("60日收益", pct(latest.get("ret60")))
     c4.metric("MA20斜率", pct(latest.get("ma20_slope")))
     render_price_chart(detail, key)
-    st.dataframe(detail.tail(80), use_container_width=True)
+    with st.expander("查看最近 K 线数据"):
+        st.dataframe(detail.tail(80), use_container_width=True)
+
+
+def render_score_summary(scored: dict) -> None:
+    cols = st.columns(5)
+    cols[0].metric("信号", scored.get("signal", "板块评分"))
+    cols[1].metric("趋势分", num(scored.get("score"), 4))
+    cols[2].metric("20日", pct(scored.get("ret20")))
+    cols[3].metric("60日", pct(scored.get("ret60")))
+    cols[4].metric("收盘", num(scored.get("close")))
+    st.write(scored.get("reason", ""))
 
 
 def render_fund_flow(flow: pd.DataFrame, title: str) -> None:
@@ -194,58 +252,6 @@ def render_fund_flow(flow: pd.DataFrame, title: str) -> None:
         if col in flow.columns
     ]
     st.dataframe(flow[visible].tail(30), use_container_width=True)
-
-
-def render_score_summary(scored: dict) -> None:
-    cols = st.columns(5)
-    cols[0].metric("信号", scored.get("signal", "板块评分"))
-    cols[1].metric("趋势分", num(scored.get("score"), 4))
-    cols[2].metric("20日", pct(scored.get("ret20")))
-    cols[3].metric("60日", pct(scored.get("ret60")))
-    cols[4].metric("收盘", num(scored.get("close")))
-    st.write(scored.get("reason", ""))
-
-
-def get_database_overview() -> dict[str, int | str | None]:
-    if hasattr(db_api, "fetch_database_overview"):
-        return db_api.fetch_database_overview()
-    init_database()
-    with db_api.mysql_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select
-                    count(*) as report_count,
-                    min(report_date) as first_report_date,
-                    max(report_date) as latest_report_date,
-                    coalesce(sum(sector_count), 0) as sector_rows,
-                    coalesce(sum(stock_count), 0) as stock_rows,
-                    coalesce(sum(etf_count), 0) as etf_rows
-                from reports
-                """
-            )
-            row = cur.fetchone() or {}
-            cur.execute("select count(*) as event_count from monitor_events")
-            events = cur.fetchone() or {}
-    return {
-        "report_count": int(row.get("report_count") or 0),
-        "first_report_date": str(row.get("first_report_date")) if row.get("first_report_date") else None,
-        "latest_report_date": str(row.get("latest_report_date")) if row.get("latest_report_date") else None,
-        "sector_rows": int(row.get("sector_rows") or 0),
-        "stock_rows": int(row.get("stock_rows") or 0),
-        "etf_rows": int(row.get("etf_rows") or 0),
-        "monitor_event_count": int(events.get("event_count") or 0),
-    }
-
-
-def remove_report(report_id: int) -> None:
-    if hasattr(db_api, "delete_report"):
-        db_api.delete_report(report_id)
-        return
-    init_database()
-    with db_api.mysql_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("delete from reports where id=%s", (report_id,))
 
 
 def rank_sectors_safe(start: str, end: str, board_type: str, limit: int, refresh: bool = False) -> pd.DataFrame:
@@ -307,296 +313,422 @@ def etf_history_safe(symbol: str, start: str, end: str, refresh: bool = False) -
     return fresh.etf_history(symbol, start, end, refresh=refresh)
 
 
+def sector_history_safe(sector: str, start: str, end: str, board_type: str, refresh: bool = False) -> pd.DataFrame:
+    try:
+        return data.sector_history(sector, start, end, board_type, refresh=refresh)
+    except TypeError as exc:
+        if "refresh" not in str(exc):
+            raise
+        return data.sector_history(sector, start, end, board_type)
+
+
 def score_etf_safe(symbol: str, start: str, end: str) -> tuple[dict, pd.DataFrame]:
     history = etf_history_safe(symbol, start, end)
     return score_stock(history, 0.0), history
 
 
-def stock_fund_flow_safe(symbol: str) -> pd.DataFrame:
-    if hasattr(data, "stock_fund_flow"):
-        return data.stock_fund_flow(symbol)
-    return pd.DataFrame()
+def inject_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .block-container { padding-top: 1.2rem; }
+        div[data-testid="stMetric"] {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .radar-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 14px;
+            background: #fff;
+            min-height: 154px;
+            margin-bottom: 10px;
+        }
+        .radar-title { font-weight: 800; font-size: 1rem; margin-bottom: 2px; }
+        .radar-code { color: #667085; font-size: .82rem; margin-bottom: 10px; }
+        .radar-reason { color: #475467; font-size: .86rem; line-height: 1.45; margin-top: 8px; }
+        .tag {
+            display: inline-block;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: .78rem;
+            font-weight: 800;
+        }
+        .tag.strong { color: #b42318; background: #fff1f1; }
+        .tag.mid { color: #9a5b13; background: #fff7e8; }
+        .tag.watch { color: #526173; background: #f1f4f8; }
+        .note-box {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fff;
+            padding: 12px 14px;
+            color: #475467;
+            line-height: 1.55;
+        }
+        .warn-box {
+            border: 1px solid #f6d58f;
+            border-radius: 8px;
+            background: #fffbeb;
+            color: #9a5b13;
+            padding: 12px 14px;
+            line-height: 1.55;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-def sector_fund_flow_safe(sector: str, board_type: str) -> pd.DataFrame:
-    if hasattr(data, "sector_fund_flow"):
-        return data.sector_fund_flow(sector, board_type)
-    return pd.DataFrame()
+def card_markup(title: str, code: str, level: str, score: Any, ret20: Any, reason: str, subtitle: str = "") -> str:
+    return f"""
+    <div class="radar-card">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div>
+          <div class="radar-title">{title}</div>
+          <div class="radar-code">{code}{' · ' + subtitle if subtitle else ''}</div>
+        </div>
+        <span class="tag {status_class(level)}">{level}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><b>{num(score, 3)}</b><br><span style="color:#667085;font-size:.78rem;">趋势分</span></div>
+        <div><b>{pct(ret20)}</b><br><span style="color:#667085;font-size:.78rem;">20日</span></div>
+      </div>
+      <div class="radar-reason">{reason}</div>
+    </div>
+    """
 
 
-def load_workspace_for_date(
-    scan_date: date,
+def normalize_sector_rows(ranked: pd.DataFrame, limit: int = 3) -> list[dict]:
+    if ranked is None or ranked.empty:
+        return []
+    rows = []
+    for _, row in ranked.head(limit).iterrows():
+        score = row.get("score", 0)
+        rows.append(
+            {
+                "type": "sector",
+                "code": str(row.get("code", "") or row.get("sector", "")),
+                "name": str(row.get("sector", "")),
+                "level": level_from_score(score),
+                "score": score,
+                "ret20": row.get("ret20"),
+                "ret60": row.get("ret60"),
+                "reason": str(row.get("reason", "")),
+                "row": row.to_dict(),
+            }
+        )
+    return rows
+
+
+def normalize_stock_rows(scan: pd.DataFrame, limit: int = 6) -> list[dict]:
+    if scan is None or scan.empty:
+        return []
+    rows = []
+    ordered = scan.copy()
+    if "score" in ordered.columns:
+        ordered = ordered.sort_values("score", ascending=False)
+    for _, row in ordered.head(limit).iterrows():
+        signal = str(row.get("signal", ""))
+        score = row.get("score", 0)
+        rows.append(
+            {
+                "type": "stock",
+                "code": str(row.get("symbol", "")).zfill(6),
+                "name": str(row.get("name", "")),
+                "sector": str(row.get("sector", "")),
+                "level": level_from_stance(row.get("stance"), score, signal),
+                "score": score,
+                "ret20": row.get("ret20"),
+                "ret60": row.get("ret60"),
+                "reason": str(row.get("reason", "")),
+                "row": row.to_dict(),
+            }
+        )
+    return rows
+
+
+def normalize_etf_rows(etfs: pd.DataFrame, limit: int = 5) -> list[dict]:
+    if etfs is None or etfs.empty or "error" in etfs.columns:
+        return []
+    rows = []
+    ordered = etfs.copy()
+    if "score" in ordered.columns:
+        ordered = ordered.sort_values("score", ascending=False)
+    for _, row in ordered.head(limit).iterrows():
+        score = row.get("score", 0)
+        rows.append(
+            {
+                "type": "etf",
+                "code": str(row.get("symbol", "")).zfill(6),
+                "name": str(row.get("name", "")),
+                "level": level_from_score(score),
+                "score": score,
+                "ret20": None,
+                "ret60": None,
+                "reason": f"实时涨幅 {raw_pct(row.get('pct_chg'))}，成交额 {num(row.get('amount'), 0)}。",
+                "row": row.to_dict(),
+            }
+        )
+    return rows
+
+
+def run_radar_scan(
+    scanner: TrendScanner,
+    start: str,
+    end: str,
     board_type: str,
     top_sectors: int,
     stocks_per_sector: int,
-    force_refresh: bool = False,
+    etf_prefilter: int,
+    top_etfs: int,
 ) -> None:
-    start = ymd(st.session_state["start_date"])
-    end = ymd(scan_date)
-    ranked = rank_sectors_safe(start, end, board_type, top_sectors, refresh=force_refresh)
-    st.session_state["ranked"] = ranked
-    if not ranked.empty:
-        set_selected_sector(str(ranked.iloc[0]["sector"]), str(ranked.iloc[0].get("code", "")))
-    scan = scan_safe(
-        start,
-        end,
-        board_type,
-        top_sectors,
-        stocks_per_sector,
-        member_limit=settings.daily_member_limit,
-        refresh=force_refresh,
-    )
-    st.session_state["scan"] = scan
-    st.session_state["workspace_loaded_date"] = scan_date.strftime("%Y-%m-%d")
-    if not scan.empty:
-        save_daily_scan(scan, scan_date.strftime("%Y-%m-%d"))
+    progress = st.progress(0, text="准备扫描任务...")
+    started = time.monotonic()
+    errors: list[str] = []
+    ranked = pd.DataFrame()
+    scan = pd.DataFrame()
+    etfs = pd.DataFrame()
 
+    try:
+        progress.progress(15, text="获取强势板块排行...")
+        ranked = rank_sectors_safe(start, end, board_type, top_sectors)
+    except Exception as exc:
+        errors.append(f"板块排行失败：{exc}")
 
-data = service("baostock-linked-workflow-v3")
-scanner = TrendScanner(data, settings)
+    try:
+        progress.progress(48, text="拉取板块成分并评分个股...")
+        scan = scan_safe(start, end, board_type, top_sectors, stocks_per_sector, member_limit=settings.daily_member_limit)
+        if not scan.empty:
+            save_daily_scan(scan, pd.to_datetime(end).strftime("%Y-%m-%d"))
+    except Exception as exc:
+        errors.append(f"个股扫描失败：{exc}")
 
-st.title("A股板块趋势工作台")
-st.caption("先选强势板块，再看板块内强势个股；个股不合适时，用 ETF 候选做替代观察。仅用于研究，不构成投资建议。")
+    try:
+        progress.progress(76, text="筛选 ETF 候选...")
+        etfs = load_etf_candidates(etf_prefilter, top_etfs)
+        if "error" in etfs.columns:
+            errors.append(str(etfs.iloc[0]["error"]))
+    except Exception as exc:
+        errors.append(f"ETF 候选失败：{exc}")
 
-with st.sidebar:
-    st.markdown("### 扫描参数")
-    board_type = st.radio("板块类型", ["industry", "concept"], format_func=lambda x: "行业板块" if x == "industry" else "概念板块")
-    if "start_date" not in st.session_state:
-        st.session_state["start_date"] = pd.to_datetime(settings.start_date).date()
-    if "end_date" not in st.session_state:
-        st.session_state["end_date"] = date.today()
-    if st.button("日期切到昨天"):
-        st.session_state["end_date"] = date.today() - timedelta(days=1)
-    start_date = st.date_input("数据起点", key="start_date")
-    end_date = st.date_input("工作台/报告日期", key="end_date")
-    top_sectors = st.slider("关注板块数", 1, 20, settings.scan_top_sectors)
-    stocks_per_sector = st.slider("每板块个股数", 1, 10, settings.scan_top_stocks_per_sector)
-    etf_prefilter = st.slider("ETF 预筛数量", 10, 100, settings.daily_etf_prefilter)
-    top_etfs = st.slider("ETF 展示数量", 3, 30, settings.daily_top_etfs)
-
-tabs = st.tabs(["工作台", "报告", "监控", "任务中心"])
-
-with tabs[0]:
-    st.subheader("工作台")
-    c1, c2, c3 = st.columns([1, 1, 1])
-    load_workspace = c1.button("加载所选日期工作台", type="primary")
-    refresh_from_baostock = c2.button("从BaoStock强制刷新")
-    refresh_rank = c3.button("只加载板块排行")
-
-    if load_workspace or refresh_from_baostock:
-        with st.spinner("正在准备板块和个股工作台数据..."):
-            try:
-                load_workspace_for_date(end_date, board_type, top_sectors, stocks_per_sector, force_refresh=refresh_from_baostock)
-                source = "BaoStock最新数据" if refresh_from_baostock else "本地缓存优先"
-                st.success(f"{end_date:%Y-%m-%d} 工作台已加载：{source}")
-            except Exception as exc:
-                st.error(f"工作台加载失败：{exc}")
-    elif refresh_rank:
-        with st.spinner("正在计算强势板块..."):
-            try:
-                ranked = rank_sectors_safe(ymd(start_date), ymd(end_date), board_type, top_sectors)
-                st.session_state["ranked"] = ranked
-                st.session_state["workspace_loaded_date"] = end_date.strftime("%Y-%m-%d")
-                if not ranked.empty:
-                    set_selected_sector(str(ranked.iloc[0]["sector"]), str(ranked.iloc[0].get("code", "")))
-            except Exception as exc:
-                st.error(f"板块排行失败：{exc}")
-
-    if st.session_state.get("workspace_loaded_date"):
-        st.caption(f"当前工作台数据日期：{st.session_state['workspace_loaded_date']}")
-
-    ranked = st.session_state.get("ranked")
-    scan = st.session_state.get("scan")
-
-    st.markdown("### 1. 选强势板块")
-    if isinstance(ranked, pd.DataFrame) and not ranked.empty:
-        sector_cols = [col for col in ["sector", "code", "score", "ret20", "ret60", "relative_strength", "reason"] if col in ranked.columns]
-        sector_event = st.dataframe(
-            ranked[sector_cols],
-            use_container_width=True,
-            hide_index=True,
-            key="sector_rank_table",
-            on_select="rerun",
-            selection_mode="single-row",
-        )
-        sector_idx = selected_row_index(sector_event)
-        if sector_idx is not None:
-            selected = ranked.iloc[sector_idx]
-            set_selected_sector(str(selected["sector"]), str(selected.get("code", "")))
-        selected_sector = st.session_state.get("selected_sector", str(ranked.iloc[0]["sector"]))
-        st.success(f"当前板块：{selected_sector}")
-        render_fund_flow(sector_fund_flow_safe(selected_sector, board_type), "板块资金流")
+    progress.progress(100, text="整理结果和异常提示...")
+    elapsed = time.monotonic() - started
+    st.session_state["radar_ranked"] = ranked
+    st.session_state["radar_scan"] = scan
+    st.session_state["radar_etfs"] = etfs
+    st.session_state["radar_errors"] = errors + scanner.data.warnings
+    st.session_state["radar_elapsed"] = elapsed
+    if errors and (not ranked.empty or not scan.empty or (not etfs.empty and "error" not in etfs.columns)):
+        st.session_state["radar_status"] = "部分失败"
+    elif errors:
+        st.session_state["radar_status"] = "失败"
     else:
-        selected_sector = ""
-        st.info("点击“刷新工作台”开始。")
+        st.session_state["radar_status"] = "完成"
+    time.sleep(0.2)
+    progress.empty()
 
-    st.markdown("### 2. 从强势板块选强势股票")
-    stock_candidates = pd.DataFrame()
-    if selected_sector and isinstance(scan, pd.DataFrame) and not scan.empty:
-        stock_candidates = scan[scan["sector"].astype(str).eq(str(selected_sector))].copy()
-        if stock_candidates.empty:
-            st.info("当前板块还没有筛出的个股候选，可以刷新工作台或扩大每板块个股数。")
+
+def infer_search_type(text: str, selected: str) -> str:
+    if selected != "auto":
+        return selected
+    code = normalize_code(text) if text.isdigit() else text
+    if str(code).isdigit() and str(code).zfill(6).startswith(("5", "1")):
+        return "etf"
+    if str(code).isdigit() and len(str(code).zfill(6)) == 6:
+        return "stock"
+    return "sector"
+
+
+def render_candidate_list(title: str, note: str, rows: list[dict], empty_text: str, key_prefix: str) -> None:
+    st.markdown(f"#### {title}")
+    st.caption(note)
+    if not rows:
+        st.info(empty_text)
+        return
+    for idx, item in enumerate(rows):
+        st.markdown(
+            card_markup(
+                item["name"],
+                item["code"],
+                item["level"],
+                item["score"],
+                item.get("ret20"),
+                item["reason"],
+                item.get("sector", ""),
+            ),
+            unsafe_allow_html=True,
+        )
+        c1, c2 = st.columns(2)
+        if c1.button("详情", key=f"{key_prefix}_detail_{idx}_{item['code']}", use_container_width=True):
+            set_selected_target(item["type"], item["code"], item["name"], item["row"])
+        if c2.button("收藏", key=f"{key_prefix}_fav_{idx}_{item['code']}", use_container_width=True):
+            favorites = st.session_state.setdefault("favorites", [])
+            favorite_id = f"{item['type']}:{item['code']}"
+            if favorite_id not in [fav["id"] for fav in favorites]:
+                favorites.append({"id": favorite_id, **item})
+                st.toast(f"已收藏：{item['name']}")
+
+
+def render_selected_detail(data: MarketDataService, start: str, end: str, board_type: str) -> None:
+    target = selected_target()
+    row = target.get("row", {})
+    target_type = target.get("type", "sector")
+    code = str(target.get("code", ""))
+    name = str(target.get("name", ""))
+    level = level_from_stance(row.get("stance"), row.get("score", 0), row.get("signal", ""))
+
+    st.markdown(f"### {name}")
+    st.markdown(f"<span class='tag {status_class(level)}'>{level}</span> <span style='color:#667085'>{target_type} · {code}</span>", unsafe_allow_html=True)
+    detail_tabs = st.tabs(["评分", "K线", "数据"])
+    with detail_tabs[0]:
+        if row:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("趋势分", num(row.get("score"), 4))
+            c2.metric("20日", pct(row.get("ret20")))
+            c3.metric("60日", pct(row.get("ret60")))
+            c4.metric("相对强度", pct(row.get("relative_strength", row.get("relativeStrength"))))
+            st.write(row.get("reason", "暂无评分理由。"))
         else:
-            stock_cols = [
-                col
-                for col in [
-                    "sector_rank",
-                    "sector",
-                    "symbol",
-                    "name",
-                    "stance",
-                    "stance_score",
-                    "signal",
-                    "today_pct",
-                    "score",
-                    "ret20",
-                    "ret60",
-                    "reason",
-                ]
-                if col in stock_candidates.columns
-            ]
-            stock_event = st.dataframe(
-                stock_candidates[stock_cols],
-                use_container_width=True,
-                hide_index=True,
-                key="stock_candidate_table",
-                on_select="rerun",
-                selection_mode="single-row",
-            )
-            stock_idx = selected_row_index(stock_event)
-            if stock_idx is not None:
-                selected = stock_candidates.iloc[stock_idx]
-                st.session_state["selected_stock"] = str(selected["symbol"]).zfill(6)
-                st.session_state["selected_stock_name"] = str(selected.get("name", ""))
-            elif not st.session_state.get("selected_stock") and not stock_candidates.empty:
-                selected = stock_candidates.iloc[0]
-                st.session_state["selected_stock"] = str(selected["symbol"]).zfill(6)
-                st.session_state["selected_stock_name"] = str(selected.get("name", ""))
-    elif selected_sector:
-        st.info("板块已选好，点击“刷新工作台”生成板块内个股候选。")
-
-    selected_stock = st.session_state.get("selected_stock", "")
-    if selected_stock:
-        st.markdown("### 3. 查看强势股走势")
-        with st.spinner(f"正在加载 {selected_stock} 行情..."):
+            st.info("请选择候选或使用搜索评分。")
+    with detail_tabs[1]:
+        st.caption("K 线按需从行情接口获取，可写入行情缓存，但不默认写入报告数据库。")
+        if not code:
+            st.info("请选择个股、ETF 或板块后查看 K 线。")
+        else:
             try:
-                stock_hist = stock_history_safe(selected_stock, ymd(start_date), ymd(end_date))
-                render_price_detail(f"{selected_stock} {st.session_state.get('selected_stock_name', '')}", stock_hist, "workspace_stock")
-                render_fund_flow(stock_fund_flow_safe(selected_stock), "个股资金流")
+                with st.spinner("正在按需获取 K 线..."):
+                    if target_type == "stock":
+                        history = stock_history_safe(code, start, end)
+                    elif target_type == "etf":
+                        history = etf_history_safe(code, start, end)
+                    else:
+                        sector_key = row.get("code") or name or code
+                        history = sector_history_safe(str(sector_key), start, end, board_type)
+                render_price_detail(f"{code} {name}", history, f"detail_{target_type}_{code}")
             except Exception as exc:
-                st.error(f"个股详情失败：{exc}")
+                st.error(f"K 线接口暂不可用：{exc}")
+    with detail_tabs[2]:
+        rows = [
+            ("数据源", "Baostock 日线/指数/ETF；AKShare ETF 列表增强"),
+            ("K 线存储", "按需接口获取，可缓存，不默认进入报告库"),
+            ("报告存储", "HTML、候选摘要、变化提醒和生成参数入库"),
+            ("异常策略", "单接口失败不阻塞整次扫描，优先展示成功结果和缓存"),
+        ]
+        st.dataframe(pd.DataFrame(rows, columns=["项目", "说明"]), hide_index=True, use_container_width=True)
 
-    st.markdown("### 4. ETF 替代选择")
-    etfs = load_etf_candidates(etf_prefilter, top_etfs)
-    if "error" in etfs.columns:
-        st.warning(etfs.iloc[0]["error"])
-    elif etfs.empty:
-        st.info("暂无 ETF 候选。")
-    else:
-        etf_event = st.dataframe(
-            etfs,
-            use_container_width=True,
-            hide_index=True,
-            key="etf_candidate_table",
-            on_select="rerun",
-            selection_mode="single-row",
-        )
-        etf_idx = selected_row_index(etf_event)
-        if etf_idx is not None:
-            selected = etfs.iloc[etf_idx]
-            st.session_state["selected_etf"] = str(selected["symbol"]).zfill(6)
-            st.session_state["selected_etf_name"] = str(selected.get("name", ""))
-        elif not st.session_state.get("selected_etf"):
-            selected = etfs.iloc[0]
-            st.session_state["selected_etf"] = str(selected["symbol"]).zfill(6)
-            st.session_state["selected_etf_name"] = str(selected.get("name", ""))
 
-    selected_etf = st.session_state.get("selected_etf", "")
-    if selected_etf:
-        with st.spinner(f"正在加载 ETF {selected_etf} 行情..."):
-            try:
-                etf_hist = etf_history_safe(selected_etf, ymd(start_date), ymd(end_date))
-                render_price_detail(f"ETF {selected_etf} {st.session_state.get('selected_etf_name', '')}", etf_hist, "workspace_etf")
-            except Exception as exc:
-                st.error(f"ETF 详情失败：{exc}")
+def render_radar_workspace(data: MarketDataService, scanner: TrendScanner, board_type: str, start_date: date, end_date: date, top_sectors: int, stocks_per_sector: int, etf_prefilter: int, top_etfs: int) -> None:
+    st.markdown("## 今日机会雷达")
+    st.caption("极简清单先给结论；点击后再看评分、K 线和数据来源。报告沉淀，K 线按需接口获取。")
 
-    st.markdown("### 5. 生成报告")
-    report_cols = st.columns(3)
-    if report_cols[0].button("生成今天报告并推送", key="workspace_generate_today"):
+    status = st.session_state.get("radar_status", "空闲")
+    ranked = st.session_state.get("radar_ranked", pd.DataFrame())
+    scan = st.session_state.get("radar_scan", pd.DataFrame())
+    etfs = st.session_state.get("radar_etfs", pd.DataFrame())
+    errors = st.session_state.get("radar_errors", [])
+    elapsed = st.session_state.get("radar_elapsed", 0.0)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("报告日期", end_date.strftime("%Y-%m-%d"))
+    c2.metric("市场状态", "中性偏强" if status != "失败" else "谨慎")
+    c3.metric("扫描状态", status)
+    c4.metric("耗时", f"{elapsed:.1f}s" if elapsed else "-")
+    c5.metric("观察数量", len(st.session_state.get("favorites", [])))
+
+    if status in {"部分失败", "失败"} and errors:
+        st.markdown("<div class='warn-box'><b>数据提示</b><br>" + "<br>".join(errors[:6]) + "</div>", unsafe_allow_html=True)
+
+    actions = st.columns([1, 1, 1, 3])
+    if actions[0].button("重新扫描", type="primary", use_container_width=True):
+        run_radar_scan(scanner, ymd(start_date), ymd(end_date), board_type, top_sectors, stocks_per_sector, etf_prefilter, top_etfs)
+        st.rerun()
+    if actions[1].button("生成报告", use_container_width=True):
         with st.spinner("正在生成报告、入库并推送..."):
             try:
                 generated_path = run_daily(date.today(), force=True, notify_enabled=True)
+                st.session_state["last_report_path"] = str(generated_path) if generated_path else ""
                 st.success(f"报告已生成：{generated_path}")
             except Exception as exc:
                 st.error(f"生成失败：{exc}")
-    if report_cols[1].button("下载当前扫描 CSV", disabled=not isinstance(scan, pd.DataFrame) or scan.empty):
-        if isinstance(scan, pd.DataFrame) and not scan.empty:
-            st.download_button(
-                "确认下载",
-                scan.to_csv(index=False, encoding="utf-8-sig"),
-                file_name=f"{end_date:%Y-%m-%d}_scan.csv",
-                mime="text/csv",
-            )
+    if actions[2].button("分享报告", use_container_width=True):
+        if st.session_state.get("last_report_path"):
+            st.info("分享入口已预留：后续可把报告 HTML 发布到公网只读链接。当前先使用本地 HTML 或报告中心查看。")
+        else:
+            st.warning("请先生成报告，再创建分享链接。")
 
-    with st.expander("手动评分 / 单独查看"):
-        score_kind = st.radio(
-            "评分对象",
-            ["stock", "sector", "etf"],
-            horizontal=True,
-            format_func=lambda x: {"stock": "个股", "sector": "板块", "etf": "ETF"}[x],
-        )
-        code = st.text_input("代码或名称", placeholder="个股如 600519；板块如 BK1625 或 钨；ETF 如 510300")
-        if st.button("计算评分", type="primary") and code.strip():
-            with st.spinner("正在计算评分..."):
+    with st.container(border=True):
+        s1, s2, s3 = st.columns([2, 1, 1])
+        search_text = s1.text_input("搜索评分", placeholder="输入 600519、510300、机器人 等", label_visibility="collapsed")
+        search_type = s2.selectbox("类型", ["auto", "stock", "sector", "etf"], format_func=lambda x: {"auto": "自动识别", "stock": "个股", "sector": "板块", "etf": "ETF"}[x], label_visibility="collapsed")
+        if s3.button("临时评分", use_container_width=True) and search_text.strip():
+            kind = infer_search_type(search_text.strip(), search_type)
+            with st.spinner("正在临时评分..."):
                 try:
-                    if score_kind == "stock":
-                        scored, hist = score_stock_code(data, code.strip(), ymd(start_date), ymd(end_date))
-                        flow = stock_fund_flow_safe(code.strip())
-                    elif score_kind == "sector":
-                        scored, hist = score_sector_key(data, code.strip(), ymd(start_date), ymd(end_date), board_type, settings)
-                        flow = sector_fund_flow_safe(code.strip(), board_type)
+                    if kind == "stock":
+                        scored, _ = score_stock_code(data, search_text.strip(), ymd(start_date), ymd(end_date))
+                        name = search_text.strip()
+                    elif kind == "etf":
+                        scored, _ = score_etf_safe(search_text.strip(), ymd(start_date), ymd(end_date))
+                        name = search_text.strip()
                     else:
-                        scored, hist = score_etf_safe(code.strip(), ymd(start_date), ymd(end_date))
-                        flow = pd.DataFrame()
-                    render_score_summary(scored)
-                    render_price_detail(code.strip(), hist, f"manual_{score_kind}")
-                    if score_kind != "etf":
-                        render_fund_flow(flow, "资金流")
+                        scored, _ = score_sector_key(data, search_text.strip(), ymd(start_date), ymd(end_date), board_type, settings)
+                        name = search_text.strip()
+                    row = {**scored, "reason": scored.get("reason", "临时评分结果")}
+                    set_selected_target(kind, search_text.strip(), name, row)
+                    st.success("临时评分已展示在右侧详情区。")
                 except Exception as exc:
-                    st.error(f"评分失败：{exc}")
+                    st.error(f"临时评分失败：{exc}")
 
-with tabs[1]:
-    st.subheader("报告")
-    st.caption("按日期生成、查看或删除报告；删除后可重新生成，避免旧报告缓存影响判断。")
-    report_date = st.date_input("报告日期", value=end_date, key="report_date")
-    r0, r1, r2 = st.columns(3)
-    if r0.button("生成所选日期报告", type="primary", key="history_generate_selected"):
-        with st.spinner("正在生成报告、写入数据库并推送..."):
+    sector_rows = normalize_sector_rows(ranked, 3)
+    stock_rows = normalize_stock_rows(scan, 6)
+    etf_rows = normalize_etf_rows(etfs, 5)
+
+    left, right = st.columns([2.1, 1])
+    with left:
+        filter_tab = st.radio("候选类型", ["全部", "板块", "个股", "ETF"], horizontal=True, label_visibility="collapsed")
+        columns = st.columns(3)
+        with columns[0]:
+            if filter_tab in {"全部", "板块"}:
+                render_candidate_list("强势板块 Top 3", "先确认市场奖励的方向。", sector_rows, "暂无板块结果，点击重新扫描。", "sector")
+        with columns[1]:
+            if filter_tab in {"全部", "个股"}:
+                render_candidate_list("板块强势股 Top 6", "已过滤科创、30 开头、北交所和 ST。", stock_rows, "暂无个股候选，点击重新扫描。", "stock")
+        with columns[2]:
+            if filter_tab in {"全部", "ETF"}:
+                render_candidate_list("ETF 替代观察 Top 5", "不选股时，用 ETF 跟踪方向。", etf_rows, "暂无 ETF 候选。", "etf")
+
+    with right:
+        render_selected_detail(data, ymd(start_date), ymd(end_date), board_type)
+        st.markdown("### 观察清单")
+        favorites = st.session_state.get("favorites", [])
+        if not favorites:
+            st.info("还没有收藏。点击候选卡片下方的“收藏”加入观察。")
+        else:
+            for idx, fav in enumerate(favorites):
+                row_cols = st.columns([3, 1])
+                row_cols[0].write(f"**{fav['name']}**  \n{fav['type']} · {fav['code']} · {fav['level']}")
+                if row_cols[1].button("移除", key=f"remove_fav_{idx}"):
+                    favorites.pop(idx)
+                    st.rerun()
+
+
+def render_reports() -> None:
+    st.subheader("报告中心")
+    st.caption("报告 HTML 和候选摘要会入库；K 线详情仍按需接口获取，不默认跟随报告存库。")
+    if st.button("手动生成今天报告并推送", type="primary", key="history_generate_today"):
+        with st.spinner("正在刷新行情、生成今天报告、写入数据库并推送..."):
             try:
-                generated_path = run_daily(report_date, force=True, notify_enabled=True)
+                generated_path = run_daily(date.today(), force=True, notify_enabled=True)
                 if generated_path:
                     st.session_state["history_generated_path"] = str(generated_path.resolve())
                     st.session_state["history_generated_html"] = generated_path.read_text(encoding="utf-8")
                     st.success(f"报告已生成：{generated_path.resolve()}")
                 else:
-                    st.info("非交易日，已跳过生成。")
+                    st.info("今天不是交易日，已跳过生成。")
             except Exception as exc:
                 st.error(f"生成失败：{exc}")
-    if r1.button("从BaoStock刷新后生成", key="history_refresh_generate"):
-        with st.spinner("正在强制刷新工作台数据并生成报告..."):
-            try:
-                load_workspace_for_date(report_date, board_type, top_sectors, stocks_per_sector, force_refresh=True)
-                generated_path = run_daily(report_date, force=True, notify_enabled=True)
-                st.success(f"已刷新并生成：{generated_path}")
-            except Exception as exc:
-                st.error(f"刷新生成失败：{exc}")
-    if r2.button("只预热所选日期数据", key="history_warm_selected"):
-        with st.spinner("正在从 BaoStock 拉取板块和个股数据..."):
-            try:
-                load_workspace_for_date(report_date, board_type, top_sectors, stocks_per_sector, force_refresh=True)
-                st.success(f"{report_date:%Y-%m-%d} 板块+个股数据已拉取到本地缓存。")
-            except Exception as exc:
-                st.error(f"预热失败：{exc}")
 
     if st.session_state.get("history_generated_html"):
         st.info(f"本地报告位置：{st.session_state.get('history_generated_path')}")
@@ -604,105 +736,82 @@ with tabs[1]:
 
     try:
         init_database()
-        overview = get_database_overview()
         reports = fetch_recent_reports(60)
     except Exception as exc:
-        overview = {}
         reports = pd.DataFrame()
         st.error(f"读取数据库失败：{exc}")
 
-    if overview:
-        cache_stats = data.cache.stats()
-        d1, d2, d3, d4, d5, d6 = st.columns(6)
-        d1.metric("报告数", overview.get("report_count", 0))
-        d2.metric("个股记录", overview.get("stock_rows", 0))
-        d3.metric("ETF记录", overview.get("etf_rows", 0))
-        d4.metric("最新报告", overview.get("latest_report_date") or "-")
-        d5.metric("缓存表", cache_stats.get("table_count", 0))
-        d6.metric("缓存行", cache_stats.get("row_count", 0))
-
     if reports.empty:
         st.info("数据库里还没有历史报告。可以先运行 `python -m src.daily_job --force`。")
-    else:
-        options = {f"{row.report_date} - {row.title}": int(row.id) for row in reports.itertuples()}
-        selected_label = st.selectbox("选择报告", list(options.keys()))
-        selected_id = options[selected_label]
-        selected_report_row = reports[reports["id"].astype(int).eq(selected_id)].iloc[0]
-        selected_report_date = pd.to_datetime(selected_report_row["report_date"]).date()
-        del1, del2 = st.columns(2)
-        if del1.button("删除选中报告", key="delete_selected_report"):
-            try:
-                remove_report(selected_id)
-                st.success("已删除选中报告。")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"删除失败：{exc}")
-        if del2.button("删除并重新生成所选日期", key="delete_regenerate_report"):
-            try:
-                remove_report(selected_id)
-                generated_path = run_daily(selected_report_date, force=True, notify_enabled=True)
-                st.success(f"已删除并重新生成：{generated_path}")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"删除重生成失败：{exc}")
-        changes = fetch_table("changes", selected_id)
-        sectors = fetch_table("sectors", selected_id)
-        stocks = fetch_table("stocks", selected_id)
-        etfs = fetch_table("etfs", selected_id)
+        return
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("板块", len(sectors))
-        c2.metric("个股", len(stocks))
-        c3.metric("ETF", len(etfs))
-        c4.metric("变化提醒", len(changes))
+    options = {f"{row.report_date} - {row.title}": int(row.id) for row in reports.itertuples()}
+    selected_label = st.selectbox("选择报告", list(options.keys()))
+    selected_id = options[selected_label]
+    changes = fetch_table("changes", selected_id)
+    sectors = fetch_table("sectors", selected_id)
+    stocks = fetch_table("stocks", selected_id)
+    etfs = fetch_table("etfs", selected_id)
 
-        view = st.radio("查看内容", ["变化提醒", "板块趋势", "候选个股", "ETF", "原始报告"], horizontal=True)
-        if view == "变化提醒":
-            change_cols = [col for col in ["change_type", "target_name", "old_rank", "new_rank", "old_score", "new_score", "message"] if col in changes.columns]
-            st.dataframe(changes[change_cols], use_container_width=True)
-        elif view == "板块趋势":
-            sector_cols = [col for col in ["rank_no", "sector", "today_pct", "score", "ret20", "ret60", "reason"] if col in sectors.columns]
-            st.dataframe(sectors[sector_cols], use_container_width=True)
-            history = fetch_sector_history(10)
-            if not history.empty:
-                top = history.groupby("sector")["score"].max().sort_values(ascending=False).head(12).index
-                chart = history[history["sector"].isin(top)].copy()
-                fig = go.Figure()
-                for sector_name, group in chart.groupby("sector"):
-                    fig.add_trace(go.Scatter(x=group["report_date"], y=group["rank_no"], mode="lines+markers", name=sector_name))
-                fig.update_layout(height=460, yaxis_title="排名", xaxis_title="日期", yaxis_autorange="reversed")
-                st.plotly_chart(fig, use_container_width=True)
-        elif view == "候选个股":
-            stock_cols = [
-                col
-                for col in [
-                    "sector_rank",
-                    "sector",
-                    "symbol",
-                    "name",
-                    "stance_text",
-                    "stance_score",
-                    "signal_text",
-                    "today_pct",
-                    "open_price",
-                    "close_price",
-                    "score",
-                    "ret20",
-                    "ret60",
-                    "reason",
-                ]
-                if col in stocks.columns
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("板块", len(sectors))
+    c2.metric("个股", len(stocks))
+    c3.metric("ETF", len(etfs))
+    c4.metric("变化提醒", len(changes))
+
+    view = st.radio("查看内容", ["变化提醒", "板块趋势", "候选个股", "ETF", "原始报告", "分享"], horizontal=True)
+    if view == "变化提醒":
+        change_cols = [col for col in ["change_type", "target_name", "old_rank", "new_rank", "old_score", "new_score", "message"] if col in changes.columns]
+        st.dataframe(changes[change_cols], use_container_width=True)
+    elif view == "板块趋势":
+        sector_cols = [col for col in ["rank_no", "sector", "today_pct", "score", "ret20", "ret60", "reason"] if col in sectors.columns]
+        st.dataframe(sectors[sector_cols], use_container_width=True)
+        history = fetch_sector_history(10)
+        if not history.empty:
+            top = history.groupby("sector")["score"].max().sort_values(ascending=False).head(12).index
+            chart = history[history["sector"].isin(top)].copy()
+            fig = go.Figure()
+            for sector_name, group in chart.groupby("sector"):
+                fig.add_trace(go.Scatter(x=group["report_date"], y=group["rank_no"], mode="lines+markers", name=sector_name))
+            fig.update_layout(height=460, yaxis_title="排名", xaxis_title="日期", yaxis_autorange="reversed")
+            st.plotly_chart(fig, use_container_width=True)
+    elif view == "候选个股":
+        stock_cols = [
+            col
+            for col in [
+                "sector_rank",
+                "sector",
+                "symbol",
+                "name",
+                "stance_text",
+                "stance_score",
+                "signal_text",
+                "today_pct",
+                "open_price",
+                "close_price",
+                "score",
+                "ret20",
+                "ret60",
+                "reason",
             ]
-            st.dataframe(stocks[stock_cols], use_container_width=True)
-        elif view == "ETF":
-            etf_cols = [col for col in ["rank_no", "symbol", "name", "signal_text", "today_pct", "close_price", "score", "ret20", "ret60", "reason"] if col in etfs.columns]
-            st.dataframe(etfs[etf_cols], use_container_width=True)
-        else:
-            html_text = fetch_report_html(selected_id)
-            components.html(html_text, height=900, scrolling=True)
+            if col in stocks.columns
+        ]
+        st.dataframe(stocks[stock_cols], use_container_width=True)
+    elif view == "ETF":
+        etf_cols = [col for col in ["rank_no", "symbol", "name", "signal_text", "today_pct", "close_price", "score", "ret20", "ret60", "reason"] if col in etfs.columns]
+        st.dataframe(etfs[etf_cols], use_container_width=True)
+    elif view == "分享":
+        st.markdown(
+            "<div class='note-box'>分享功能已预留。后续可以把报告 HTML 上传到对象存储或静态站点，生成公网只读链接；分享页只暴露报告内容，不暴露本地路径、数据库信息或接口 token。</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        html_text = fetch_report_html(selected_id)
+        components.html(html_text, height=900, scrolling=True)
 
-with tabs[2]:
-    st.subheader("监控")
+
+def render_monitors() -> None:
+    st.subheader("监控中心")
     try:
         init_database()
     except Exception as exc:
@@ -763,7 +872,8 @@ with tabs[2]:
     st.markdown("#### 最近触发")
     st.dataframe(events, use_container_width=True)
 
-with tabs[3]:
+
+def render_tasks() -> None:
     st.subheader("任务中心")
     st.caption("这里的按钮会把结果写入 MySQL，之后可在“报告”和“监控”页查看。")
     task_date = st.date_input("任务日期", date.today(), key="task_date")
@@ -809,35 +919,6 @@ with tabs[3]:
         except Exception as exc:
             st.error(f"补录失败：{exc}")
 
-    p0, p1 = st.columns(2)
-    if p0.button("从BaoStock拉取任务日期板块+个股"):
-        with st.spinner("正在强制刷新任务日期的板块和个股数据..."):
-            try:
-                load_workspace_for_date(task_date, board_type, top_sectors, stocks_per_sector, force_refresh=True)
-                st.success(f"{task_date:%Y-%m-%d} 工作台数据已刷新到本地缓存。")
-            except Exception as exc:
-                st.error(f"拉取失败：{exc}")
-    if p1.button("加载任务日期本地缓存"):
-        with st.spinner("正在从本地缓存加载任务日期工作台..."):
-            try:
-                load_workspace_for_date(task_date, board_type, top_sectors, stocks_per_sector, force_refresh=False)
-                st.success(f"{task_date:%Y-%m-%d} 工作台数据已从本地缓存加载。")
-            except Exception as exc:
-                st.error(f"加载失败：{exc}")
-
-    st.markdown("#### 数据状态")
-    cache_stats = data.cache.stats()
-    try:
-        overview = get_database_overview()
-    except Exception as exc:
-        overview = {}
-        st.info(f"MySQL 状态暂不可用：{exc}")
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("报告数", overview.get("report_count", 0) if overview else 0)
-    s2.metric("最新报告", overview.get("latest_report_date") if overview else "-")
-    s3.metric("本地缓存表", cache_stats.get("table_count", 0))
-    s4.metric("本地缓存行", cache_stats.get("row_count", 0))
-
     st.markdown("#### 最近报告记录")
     try:
         st.dataframe(fetch_recent_reports(20), use_container_width=True)
@@ -849,3 +930,38 @@ with tabs[3]:
         st.dataframe(fetch_monitor_events(50), use_container_width=True)
     except Exception as exc:
         st.error(f"读取监控记录失败：{exc}")
+
+
+inject_styles()
+data = service("baostock-linked-workflow-v4")
+scanner = TrendScanner(data, settings)
+
+with st.sidebar:
+    st.markdown("### 扫描参数")
+    board_type = st.radio("板块类型", ["industry", "concept"], format_func=lambda x: "行业板块" if x == "industry" else "概念板块")
+    if "start_date" not in st.session_state:
+        st.session_state["start_date"] = pd.to_datetime(settings.start_date).date()
+    if "end_date" not in st.session_state:
+        st.session_state["end_date"] = date.today()
+    if st.button("日期切到昨天"):
+        st.session_state["end_date"] = date.today() - timedelta(days=1)
+    start_date = st.date_input("数据起点", key="start_date")
+    end_date = st.date_input("工作台/报告日期", key="end_date")
+    top_sectors = st.slider("关注板块数", 1, 20, settings.scan_top_sectors)
+    stocks_per_sector = st.slider("每板块个股数", 1, 10, settings.scan_top_stocks_per_sector)
+    etf_prefilter = st.slider("ETF 预筛数量", 10, 100, settings.daily_etf_prefilter)
+    top_etfs = st.slider("ETF 展示数量", 3, 30, settings.daily_top_etfs)
+
+tabs = st.tabs(["今日雷达", "报告中心", "监控中心", "任务中心"])
+
+with tabs[0]:
+    render_radar_workspace(data, scanner, board_type, start_date, end_date, top_sectors, stocks_per_sector, etf_prefilter, top_etfs)
+
+with tabs[1]:
+    render_reports()
+
+with tabs[2]:
+    render_monitors()
+
+with tabs[3]:
+    render_tasks()

@@ -1,0 +1,1002 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A 股今日机会雷达原型 v2</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --surface: #fff;
+      --ink: #152033;
+      --muted: #65758b;
+      --line: #dfe5ec;
+      --accent: #185abc;
+      --accent-bg: #eaf2ff;
+      --strong: #c92a2a;
+      --strong-bg: #fff1f1;
+      --mid: #9a5b13;
+      --mid-bg: #fff7e8;
+      --watch: #526173;
+      --watch-bg: #f1f4f8;
+      --ok: #16794c;
+      --warn: #a15c07;
+      --bad: #b42318;
+      --shadow: 0 12px 30px rgba(16, 24, 40, .08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    button, input, select { font: inherit; }
+
+    .topbar {
+      background: #101827;
+      color: #fff;
+      padding: 22px 28px;
+    }
+    .topbar-inner {
+      max-width: 1480px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin-top: 8px;
+      color: #cbd5e1;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .top-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      min-height: 40px;
+      padding: 0 14px;
+      cursor: pointer;
+      font-weight: 750;
+    }
+    .button.primary {
+      border-color: transparent;
+      background: var(--accent);
+      color: #fff;
+    }
+    .button.dark {
+      border-color: rgba(255,255,255,.3);
+      background: rgba(255,255,255,.08);
+      color: #fff;
+    }
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: .68;
+    }
+
+    main {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 22px 28px 34px;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .status-card, .panel, .detail, .watchlist, .search-card, .scan-card, .toast {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .status-card {
+      padding: 13px 14px;
+      box-shadow: none;
+    }
+    .status-label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 5px;
+    }
+    .status-value {
+      font-size: 19px;
+      font-weight: 850;
+      line-height: 1.2;
+    }
+
+    .scan-card {
+      display: none;
+      padding: 14px;
+      margin-bottom: 14px;
+      box-shadow: none;
+    }
+    .scan-card.visible { display: block; }
+    .scan-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .scan-title {
+      font-weight: 850;
+    }
+    .scan-stage {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .progress {
+      height: 10px;
+      border-radius: 999px;
+      background: #e8edf3;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--accent);
+      transition: width .25s ease;
+    }
+    .scan-warning {
+      display: none;
+      margin-top: 10px;
+      color: var(--warn);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .scan-warning.visible { display: block; }
+
+    .search-card {
+      box-shadow: none;
+      margin-bottom: 16px;
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 1fr 140px auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .search-card input, .search-card select {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 12px;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .filters {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .filter-button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--ink);
+      min-height: 36px;
+      padding: 0 14px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .filter-button.active {
+      background: var(--accent-bg);
+      border-color: #9bc2ff;
+      color: var(--accent);
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 410px;
+      gap: 16px;
+      align-items: start;
+    }
+    .columns {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .panel {
+      min-height: 240px;
+      overflow: hidden;
+    }
+    .panel.dimmed { opacity: .42; }
+    .panel-head {
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 850;
+    }
+    .panel-note {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .candidate {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      padding: 13px 14px;
+      cursor: pointer;
+    }
+    .candidate:hover { background: #f9fbfd; }
+    .candidate.selected {
+      box-shadow: inset 3px 0 0 var(--accent);
+      background: #f7fbff;
+    }
+    .candidate:last-child { border-bottom: 0; }
+    .candidate-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .candidate-name {
+      font-size: 15px;
+      font-weight: 850;
+      line-height: 1.3;
+    }
+    .candidate-code {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 42px;
+      height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .tag.strong { color: var(--strong); background: var(--strong-bg); }
+    .tag.mid { color: var(--mid); background: var(--mid-bg); }
+    .tag.watch { color: var(--watch); background: var(--watch-bg); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .metric {
+      background: #f7f8fa;
+      border-radius: 6px;
+      padding: 8px;
+    }
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .metric-value {
+      margin-top: 2px;
+      font-weight: 850;
+      font-size: 14px;
+    }
+    .reason {
+      margin: 10px 0 0;
+      color: #405064;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 11px;
+    }
+    .mini-button {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      min-height: 32px;
+      padding: 0 10px;
+      cursor: pointer;
+      font-weight: 750;
+      font-size: 13px;
+    }
+    .mini-button.primary {
+      border-color: #9bc2ff;
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+
+    .side {
+      display: grid;
+      gap: 14px;
+      position: sticky;
+      top: 14px;
+    }
+    .detail {
+      padding: 16px;
+    }
+    .detail-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .detail-type {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .detail-title {
+      margin: 4px 0 0;
+      font-size: 22px;
+      line-height: 1.25;
+      font-weight: 900;
+    }
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin: 12px 0;
+    }
+    .tab {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      min-height: 34px;
+      cursor: pointer;
+      font-weight: 750;
+    }
+    .tab.active {
+      border-color: #9bc2ff;
+      color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .summary {
+      margin: 10px 0 14px;
+      color: #334155;
+      line-height: 1.55;
+    }
+    .detail-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 9px;
+    }
+    .chart {
+      margin: 14px 0;
+      height: 126px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+      overflow: hidden;
+    }
+    svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .detail-action {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid #9bc2ff;
+      border-radius: 8px;
+      background: var(--accent-bg);
+      color: var(--accent);
+      font-weight: 850;
+      cursor: pointer;
+    }
+    .data-list {
+      display: grid;
+      gap: 8px;
+    }
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 0;
+      font-size: 14px;
+    }
+    .data-row span:first-child { color: var(--muted); }
+
+    .watchlist {
+      padding: 14px;
+    }
+    .watch-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .watch-title h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .count {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .empty {
+      color: var(--muted);
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .watch-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+    }
+    .watch-item:first-child { border-top: 0; }
+    .remove-button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 750;
+    }
+
+    .toast {
+      display: none;
+      margin-top: 14px;
+      padding: 12px 14px;
+      box-shadow: none;
+      color: #334155;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+    .toast.visible { display: block; }
+    .toast.ok { border-color: #b7e4cc; background: #f0fdf4; color: var(--ok); }
+    .toast.warn { border-color: #f6d58f; background: #fffbeb; color: var(--warn); }
+    .toast.bad { border-color: #ffc9c9; background: #fff1f1; color: var(--bad); }
+
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 1220px) {
+      .layout { grid-template-columns: 1fr; }
+      .side {
+        position: static;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+    }
+    @media (max-width: 940px) {
+      .topbar-inner, .columns, .side, .status-grid, .search-card {
+        grid-template-columns: 1fr;
+      }
+      .toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      main, .topbar {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+      .top-actions { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div>
+          <h1>今日机会雷达</h1>
+          <div class="subtitle">极简清单先给结论；点击后再看评分、K 线和数据来源。报告沉淀，K 线按需接口获取。</div>
+        </div>
+        <div class="top-actions">
+          <button class="button dark" id="reportButton">生成报告</button>
+          <button class="button dark" id="shareButton">分享报告</button>
+          <button class="button primary" id="scanButton">重新扫描</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="status-grid" aria-label="今日状态">
+        <div class="status-card">
+          <div class="status-label">报告日期</div>
+          <div class="status-value">2026-06-18</div>
+        </div>
+        <div class="status-card">
+          <div class="status-label">市场状态</div>
+          <div class="status-value" id="marketState">中性偏强</div>
+        </div>
+        <div class="status-card">
+          <div class="status-label">扫描状态</div>
+          <div class="status-value" id="scanState">空闲</div>
+        </div>
+        <div class="status-card">
+          <div class="status-label">数据状态</div>
+          <div class="status-value" id="dataState">可用</div>
+        </div>
+        <div class="status-card">
+          <div class="status-label">观察数量</div>
+          <div class="status-value" id="watchCount">0</div>
+        </div>
+      </section>
+
+      <section class="scan-card" id="scanCard" aria-label="扫描进度">
+        <div class="scan-head">
+          <div>
+            <div class="scan-title" id="scanTitle">扫描中</div>
+            <div class="scan-stage" id="scanStage">准备任务...</div>
+          </div>
+          <div class="scan-stage" id="scanElapsed">0 秒</div>
+        </div>
+        <div class="progress"><div class="progress-bar" id="scanProgress"></div></div>
+        <div class="scan-warning" id="scanWarning">公开接口可能较慢。真实实现里这里可以继续等待、取消前端等待，或使用最近缓存。</div>
+      </section>
+
+      <section class="search-card" aria-label="搜索评分">
+        <input id="searchInput" placeholder="搜索股票 / ETF / 板块，例如 600519、510300、机器人">
+        <select id="searchType">
+          <option value="auto">自动识别</option>
+          <option value="stock">个股</option>
+          <option value="sector">板块</option>
+          <option value="etf">ETF</option>
+        </select>
+        <button class="button" id="scoreButton">临时评分</button>
+      </section>
+
+      <section class="toolbar" aria-label="筛选">
+        <div class="filters">
+          <button class="filter-button active" data-filter="all">全部</button>
+          <button class="filter-button" data-filter="sector">板块</button>
+          <button class="filter-button" data-filter="stock">个股</button>
+          <button class="filter-button" data-filter="etf">ETF</button>
+        </div>
+        <div class="hint">报告会入库；K 线详情优先通过接口按需获取，不默认存报告库。</div>
+      </section>
+
+      <section class="layout">
+        <div class="columns">
+          <section class="panel" data-panel="sector">
+            <div class="panel-head">
+              <h2 class="panel-title">强势板块 Top 3</h2>
+              <div class="panel-note">先确认市场正在奖励哪些方向。</div>
+            </div>
+            <div id="sectorList"></div>
+          </section>
+
+          <section class="panel" data-panel="stock">
+            <div class="panel-head">
+              <h2 class="panel-title">板块强势股 Top 6</h2>
+              <div class="panel-note">排除科创、30 开头、北交所和 ST。</div>
+            </div>
+            <div id="stockList"></div>
+          </section>
+
+          <section class="panel" data-panel="etf">
+            <div class="panel-head">
+              <h2 class="panel-title">ETF 替代观察 Top 5</h2>
+              <div class="panel-note">不选股时，用 ETF 跟踪方向。</div>
+            </div>
+            <div id="etfList"></div>
+          </section>
+        </div>
+
+        <aside class="side">
+          <section class="detail" aria-label="详情">
+            <div class="detail-head">
+              <div>
+                <div class="detail-type" id="detailType">板块</div>
+                <div class="detail-title" id="detailTitle">-</div>
+              </div>
+              <span class="tag strong" id="detailTag">强</span>
+            </div>
+            <div class="tabs">
+              <button class="tab active" data-tab="score">评分</button>
+              <button class="tab" data-tab="kline">K 线</button>
+              <button class="tab" data-tab="data">数据</button>
+            </div>
+            <div id="detailBody"></div>
+            <button class="detail-action" id="detailFavorite">收藏</button>
+          </section>
+
+          <section class="watchlist" aria-label="观察清单">
+            <div class="watch-title">
+              <h2>观察清单</h2>
+              <span class="count" id="watchLabel">0 个</span>
+            </div>
+            <div id="watchList"></div>
+            <div class="toast" id="toast"></div>
+          </section>
+        </aside>
+      </section>
+
+      <p class="footer-note">说明：本页面是原型，数据为模拟数据。页面只用于研究辅助和交互确认，不构成投资建议。</p>
+    </main>
+  </div>
+
+  <script>
+    const candidates = [
+      { id: "sector-robot", type: "sector", typeName: "板块", name: "机器人", code: "BK1187", level: "强", score: 0.86, ret20: 12.4, ret60: 24.1, relativeStrength: 8.3, amountBoost: 18.6, reason: "20 日和 60 日表现同步靠前，成交额放大，板块内强势股数量增加。", summary: "机器人方向处在多头延续阶段，适合优先进入观察清单。", source: "AKShare 板块排行 + Baostock 成分日线", cache: "否", updated: "2026-06-18 15:12", spark: [18, 22, 20, 27, 35, 42, 46, 54, 61] },
+      { id: "sector-power", type: "sector", typeName: "板块", name: "电力设备", code: "BK0451", level: "强", score: 0.78, ret20: 9.8, ret60: 18.7, relativeStrength: 5.9, amountBoost: 13.2, reason: "板块趋势分靠前，MA20 上行，近 20 日强于沪深 300。", summary: "电力设备处于修复后再加速，适合作为第二梯队观察。", source: "AKShare 板块排行 + Baostock 成分日线", cache: "否", updated: "2026-06-18 15:12", spark: [30, 28, 33, 37, 36, 44, 49, 51, 58] },
+      { id: "sector-consume", type: "sector", typeName: "板块", name: "消费电子", code: "BK1037", level: "中", score: 0.61, ret20: 7.2, ret60: 11.3, relativeStrength: 3.4, amountBoost: 7.5, reason: "短线强度恢复，但 60 日趋势仍低于第一梯队。", summary: "消费电子有改善迹象，适合作为备选观察而非首选。", source: "AKShare 板块排行 + Baostock 成分日线", cache: "部分缓存", updated: "2026-06-18 15:07", spark: [33, 30, 29, 34, 39, 38, 44, 47, 49] },
+      { id: "stock-002050", type: "stock", typeName: "个股", name: "三花智控", code: "002050", sector: "机器人", level: "强", score: 0.82, ret20: 14.6, ret60: 21.9, relativeStrength: 7.1, amountBoost: 16.4, reason: "所属板块强势，个股站上 MA20 和 MA60，并接近 20 日新高。", summary: "板块和个股趋势同向，属于今日优先观察的强势股。", source: "Baostock 股票日线，详情 K 线按需拉取", cache: "否", updated: "2026-06-18 15:16", spark: [22, 25, 31, 29, 36, 43, 47, 55, 63] },
+      { id: "stock-600580", type: "stock", typeName: "个股", name: "卧龙电驱", code: "600580", sector: "机器人", level: "强", score: 0.77, ret20: 11.8, ret60: 17.6, relativeStrength: 6.0, amountBoost: 15.2, reason: "趋势延续，成交额较 60 日均值明显放大。", summary: "强度略低于第一候选，但板块共振较好。", source: "Baostock 股票日线，详情 K 线按需拉取", cache: "否", updated: "2026-06-18 15:16", spark: [24, 27, 30, 35, 33, 39, 45, 50, 57] },
+      { id: "stock-600406", type: "stock", typeName: "个股", name: "国电南瑞", code: "600406", sector: "电力设备", level: "中", score: 0.64, ret20: 7.9, ret60: 13.0, relativeStrength: 3.6, amountBoost: 6.8, reason: "多头排列成立，但短线弹性不如机器人方向。", summary: "偏稳健的板块内候选，适合观察趋势是否继续放量。", source: "Baostock 股票日线，详情 K 线按需拉取", cache: "是", updated: "2026-06-18 15:10", spark: [34, 35, 33, 37, 39, 42, 44, 48, 50] },
+      { id: "stock-000400", type: "stock", typeName: "个股", name: "许继电气", code: "000400", sector: "电力设备", level: "中", score: 0.58, ret20: 6.4, ret60: 10.9, relativeStrength: 2.8, amountBoost: 5.1, reason: "价格位于 MA20 上方，但成交额确认一般。", summary: "趋势偏好，等待进一步放量确认。", source: "Baostock 股票日线，详情 K 线按需拉取", cache: "是", updated: "2026-06-18 15:10", spark: [38, 36, 39, 41, 40, 43, 45, 47, 48] },
+      { id: "stock-002241", type: "stock", typeName: "个股", name: "歌尔股份", code: "002241", sector: "消费电子", level: "观察", score: 0.43, ret20: 4.1, ret60: 6.7, relativeStrength: 1.2, amountBoost: 2.0, reason: "板块改善但个股趋势仍未完全展开。", summary: "适合放在观察池，等待突破和放量。", source: "Baostock 股票日线，详情 K 线按需拉取", cache: "是", updated: "2026-06-18 15:09", spark: [42, 41, 40, 43, 42, 44, 45, 46, 45] },
+      { id: "stock-000725", type: "stock", typeName: "个股", name: "京东方 A", code: "000725", sector: "消费电子", level: "观察", score: 0.39, ret20: 3.5, ret60: 5.2, relativeStrength: 0.8, amountBoost: 1.6, reason: "走势修复但强度不足，仍需等待板块继续确认。", summary: "更适合作为板块温度计，而不是当前核心候选。", source: "Baostock 股票日线，详情 K 线按需拉取", cache: "是", updated: "2026-06-18 15:09", spark: [45, 44, 43, 45, 46, 45, 47, 46, 48] },
+      { id: "etf-159819", type: "etf", typeName: "ETF", name: "人工智能 ETF", code: "159819", level: "强", score: 0.74, ret20: 10.1, ret60: 16.4, relativeStrength: 4.9, amountBoost: 12.1, reason: "ETF 涨幅与成交额靠前，走势与强势科技方向共振。", summary: "当不想分散选股时，可作为科技成长方向替代观察。", source: "AKShare ETF 列表 + Baostock/AKShare ETF 日线", cache: "否", updated: "2026-06-18 15:18", spark: [28, 30, 32, 31, 38, 43, 49, 53, 59] },
+      { id: "etf-515790", type: "etf", typeName: "ETF", name: "光伏 ETF", code: "515790", level: "中", score: 0.57, ret20: 6.8, ret60: 9.2, relativeStrength: 2.1, amountBoost: 4.7, reason: "短期回暖，但 60 日表现仍处在中等位置。", summary: "适合作为电力设备链条的替代观察。", source: "AKShare ETF 列表 + Baostock/AKShare ETF 日线", cache: "部分缓存", updated: "2026-06-18 15:14", spark: [44, 42, 41, 43, 46, 48, 47, 50, 52] },
+      { id: "etf-512480", type: "etf", typeName: "ETF", name: "半导体 ETF", code: "512480", level: "中", score: 0.55, ret20: 5.9, ret60: 8.6, relativeStrength: 1.9, amountBoost: 5.2, reason: "成交额回升，趋势仍需等待更明确突破。", summary: "可以观察是否从修复转向主升。", source: "AKShare ETF 列表 + Baostock/AKShare ETF 日线", cache: "部分缓存", updated: "2026-06-18 15:13", spark: [46, 45, 44, 46, 47, 49, 48, 52, 53] },
+      { id: "etf-510300", type: "etf", typeName: "ETF", name: "沪深 300 ETF", code: "510300", level: "观察", score: 0.36, ret20: 2.1, ret60: 3.7, relativeStrength: 0.0, amountBoost: 1.1, reason: "宽基表现平稳，适合作为市场基准观察。", summary: "不是强势方向，但可用于判断大盘环境。", source: "Baostock ETF 日线", cache: "是", updated: "2026-06-18 15:08", spark: [50, 50, 49, 50, 51, 51, 52, 52, 53] },
+      { id: "etf-588000", type: "etf", typeName: "ETF", name: "科创 50 ETF", code: "588000", level: "观察", score: 0.34, ret20: 1.8, ret60: 2.5, relativeStrength: -0.6, amountBoost: 0.7, reason: "科创方向暂不作为个股池，但 ETF 可留作环境观察。", summary: "只适合作为风格温度计。", source: "AKShare ETF 列表 + ETF 日线", cache: "是", updated: "2026-06-18 15:08", spark: [52, 51, 53, 52, 51, 52, 53, 52, 54] }
+    ];
+
+    const state = {
+      selectedId: candidates[0].id,
+      activeFilter: "all",
+      detailTab: "score",
+      favorites: new Set(),
+      reportGenerated: false,
+      scanTimer: null,
+      scanStart: 0
+    };
+
+    function levelClass(level) {
+      if (level === "强") return "strong";
+      if (level === "中") return "mid";
+      return "watch";
+    }
+    function fmtPercent(value) {
+      const sign = value > 0 ? "+" : "";
+      return `${sign}${Number(value).toFixed(1)}%`;
+    }
+    function currentItem() {
+      return candidates.find((item) => item.id === state.selectedId) || candidates[0];
+    }
+    function showToast(message, kind = "ok") {
+      const toast = document.getElementById("toast");
+      toast.className = `toast visible ${kind}`;
+      toast.textContent = message;
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.className = "toast", 3600);
+    }
+
+    function renderCard(item) {
+      const isSelected = item.id === state.selectedId;
+      const isFav = state.favorites.has(item.id);
+      return `
+        <button class="candidate ${isSelected ? "selected" : ""}" data-id="${item.id}">
+          <div class="candidate-top">
+            <div>
+              <div class="candidate-name">${item.name}</div>
+              <div class="candidate-code">${item.code}${item.sector ? ` · ${item.sector}` : ""}</div>
+            </div>
+            <span class="tag ${levelClass(item.level)}">${item.level}</span>
+          </div>
+          <div class="metrics">
+            <div class="metric"><div class="metric-label">趋势分</div><div class="metric-value">${item.score.toFixed(2)}</div></div>
+            <div class="metric"><div class="metric-label">20 日</div><div class="metric-value">${fmtPercent(item.ret20)}</div></div>
+            <div class="metric"><div class="metric-label">量能</div><div class="metric-value">${fmtPercent(item.amountBoost)}</div></div>
+          </div>
+          <p class="reason">${item.reason}</p>
+          <div class="card-actions">
+            <span class="mini-button primary" data-action="detail" data-id="${item.id}">详情</span>
+            <span class="mini-button" data-action="favorite" data-id="${item.id}">${isFav ? "已收藏" : "收藏"}</span>
+          </div>
+        </button>
+      `;
+    }
+
+    function renderLists() {
+      document.getElementById("sectorList").innerHTML = candidates.filter(i => i.type === "sector").slice(0, 3).map(renderCard).join("");
+      document.getElementById("stockList").innerHTML = candidates.filter(i => i.type === "stock").slice(0, 6).map(renderCard).join("");
+      document.getElementById("etfList").innerHTML = candidates.filter(i => i.type === "etf").slice(0, 5).map(renderCard).join("");
+      document.querySelectorAll(".panel").forEach((panel) => {
+        const panelType = panel.dataset.panel;
+        panel.classList.toggle("dimmed", state.activeFilter !== "all" && state.activeFilter !== panelType);
+      });
+    }
+
+    function renderChart(item) {
+      const points = item.spark || [45, 46, 44, 47, 49, 52, 54, 55, 58];
+      const width = 360;
+      const height = 126;
+      const min = Math.min(...points);
+      const max = Math.max(...points);
+      const spread = Math.max(max - min, 1);
+      const coords = points.map((value, index) => {
+        const x = 18 + index * ((width - 36) / (points.length - 1));
+        const y = height - 18 - ((value - min) / spread) * (height - 36);
+        return `${x},${y}`;
+      });
+      return `
+        <div class="chart">
+          <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="K 线走势摘要">
+            <path d="M18 102 H342" stroke="#e2e8f0" stroke-width="1" />
+            <path d="M18 63 H342" stroke="#e2e8f0" stroke-width="1" />
+            <path d="M18 24 H342" stroke="#e2e8f0" stroke-width="1" />
+            <polyline points="${coords.join(" ")}" fill="none" stroke="#185abc" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+            ${coords.map((point) => {
+              const [x, y] = point.split(",");
+              return `<circle cx="${x}" cy="${y}" r="3.5" fill="#185abc" />`;
+            }).join("")}
+          </svg>
+        </div>
+      `;
+    }
+
+    function renderDetailBody(item) {
+      if (state.detailTab === "score") {
+        return `
+          <p class="summary">${item.summary}</p>
+          <div class="detail-metrics">
+            <div class="metric"><div class="metric-label">趋势分</div><div class="metric-value">${item.score.toFixed(2)}</div></div>
+            <div class="metric"><div class="metric-label">20 日</div><div class="metric-value">${fmtPercent(item.ret20)}</div></div>
+            <div class="metric"><div class="metric-label">60 日</div><div class="metric-value">${fmtPercent(item.ret60)}</div></div>
+            <div class="metric"><div class="metric-label">相对强度</div><div class="metric-value">${fmtPercent(item.relativeStrength)}</div></div>
+            <div class="metric"><div class="metric-label">成交额变化</div><div class="metric-value">${fmtPercent(item.amountBoost)}</div></div>
+            <div class="metric"><div class="metric-label">类型</div><div class="metric-value">${item.typeName}</div></div>
+          </div>
+          <p class="reason">${item.reason}</p>
+        `;
+      }
+      if (state.detailTab === "kline") {
+        const sourceText = item.type === "sector"
+          ? "板块 K 线可使用 AKShare 板块历史；Baostock 行业板块只能用成分股近似。"
+          : `${item.typeName} K 线真实实现时按需调用接口，优先不存报告库。`;
+        return `
+          <p class="summary">${sourceText}</p>
+          ${renderChart(item)}
+          <div class="data-row"><span>K 线策略</span><strong>接口按需拉取，可缓存，不默认入库</strong></div>
+        `;
+      }
+      return `
+        <div class="data-list">
+          <div class="data-row"><span>数据源</span><strong>${item.source}</strong></div>
+          <div class="data-row"><span>更新时间</span><strong>${item.updated}</strong></div>
+          <div class="data-row"><span>使用缓存</span><strong>${item.cache}</strong></div>
+          <div class="data-row"><span>报告入库</span><strong>只存摘要和 HTML，不存完整 K 线</strong></div>
+          <div class="data-row"><span>异常处理</span><strong>接口失败时保留成功结果，展示失败说明</strong></div>
+        </div>
+      `;
+    }
+
+    function renderDetail() {
+      const item = currentItem();
+      document.getElementById("detailType").textContent = `${item.typeName} · ${item.code}`;
+      document.getElementById("detailTitle").textContent = item.name;
+      const tag = document.getElementById("detailTag");
+      tag.textContent = item.level;
+      tag.className = `tag ${levelClass(item.level)}`;
+      document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.detailTab));
+      document.getElementById("detailBody").innerHTML = renderDetailBody(item);
+      document.getElementById("detailFavorite").textContent = state.favorites.has(item.id) ? "取消收藏" : "收藏";
+    }
+
+    function renderWatchlist() {
+      const items = [...state.favorites].map((id) => candidates.find((item) => item.id === id)).filter(Boolean);
+      document.getElementById("watchCount").textContent = String(items.length);
+      document.getElementById("watchLabel").textContent = `${items.length} 个`;
+      if (!items.length) {
+        document.getElementById("watchList").innerHTML = `<div class="empty">还没有收藏。点击候选卡片或详情区的“收藏”，把值得跟踪的对象放进这里。</div>`;
+        return;
+      }
+      document.getElementById("watchList").innerHTML = items.map((item) => `
+        <div class="watch-item">
+          <div>
+            <strong>${item.name}</strong>
+            <div class="candidate-code">${item.typeName} · ${item.code} · ${item.level}</div>
+          </div>
+          <button class="remove-button" data-remove="${item.id}">移除</button>
+        </div>
+      `).join("");
+    }
+
+    function render() {
+      renderLists();
+      renderDetail();
+      renderWatchlist();
+    }
+
+    function toggleFavorite(id) {
+      if (state.favorites.has(id)) {
+        state.favorites.delete(id);
+      } else {
+        state.favorites.add(id);
+      }
+      render();
+    }
+
+    function startScan() {
+      const stages = [
+        { text: "获取强势板块排行", pct: 18 },
+        { text: "拉取板块成分股，跳过科创、30 开头和北交所", pct: 42 },
+        { text: "评分个股和 ETF，K 线详情保持按需接口", pct: 74 },
+        { text: "整理候选和异常提示", pct: 100 }
+      ];
+      let index = 0;
+      state.scanStart = Date.now();
+      clearInterval(state.scanTimer);
+      document.getElementById("scanCard").classList.add("visible");
+      document.getElementById("scanWarning").classList.remove("visible");
+      document.getElementById("scanButton").disabled = true;
+      document.getElementById("scanButton").textContent = "扫描中...";
+      document.getElementById("scanState").textContent = "扫描中";
+      document.getElementById("dataState").textContent = "刷新中";
+      function tick() {
+        const stage = stages[Math.min(index, stages.length - 1)];
+        const elapsed = Math.round((Date.now() - state.scanStart) / 1000);
+        document.getElementById("scanTitle").textContent = "扫描任务运行中";
+        document.getElementById("scanStage").textContent = stage.text;
+        document.getElementById("scanElapsed").textContent = `${elapsed} 秒`;
+        document.getElementById("scanProgress").style.width = `${stage.pct}%`;
+        if (elapsed >= 2) {
+          document.getElementById("scanWarning").classList.add("visible");
+        }
+        index += 1;
+        if (index > stages.length) {
+          clearInterval(state.scanTimer);
+          document.getElementById("scanButton").disabled = false;
+          document.getElementById("scanButton").textContent = "重新扫描";
+          document.getElementById("scanState").textContent = "部分失败";
+          document.getElementById("dataState").textContent = "可用";
+          document.getElementById("scanTitle").textContent = "扫描完成，部分接口降级";
+          document.getElementById("scanStage").textContent = "ETF 实时列表成功，两个板块历史接口超时，已使用缓存结果。";
+          showToast("扫描完成：保留成功结果，失败接口已降级为缓存。", "warn");
+        }
+      }
+      tick();
+      state.scanTimer = setInterval(tick, 900);
+    }
+
+    function runSearchScore() {
+      const input = document.getElementById("searchInput").value.trim();
+      const selectedType = document.getElementById("searchType").value;
+      if (!input) {
+        showToast("请输入股票代码、ETF 代码或板块名称。", "bad");
+        return;
+      }
+      const inferred = selectedType === "auto"
+        ? (/^\d{6}$/.test(input) ? (input.startsWith("5") ? "etf" : "stock") : "sector")
+        : selectedType;
+      const typeName = { stock: "个股", sector: "板块", etf: "ETF" }[inferred];
+      const existing = candidates.find((item) => item.code === input || item.name.includes(input));
+      if (existing) {
+        state.selectedId = existing.id;
+      } else {
+        const id = `search-${Date.now()}`;
+        candidates.push({
+          id,
+          type: inferred,
+          typeName,
+          name: input,
+          code: /^\d{6}$/.test(input) ? input : "临时搜索",
+          level: "观察",
+          score: 0.41,
+          ret20: 3.2,
+          ret60: 5.6,
+          relativeStrength: 0.9,
+          amountBoost: 1.8,
+          reason: "临时搜索结果：真实实现中调用评分接口，原型使用 mock 结果。",
+          summary: "这是临时评分，不自动进入日报；可以收藏后继续观察。",
+          source: `${typeName} 临时评分接口`,
+          cache: "否",
+          updated: "即时查询",
+          spark: [45, 43, 44, 45, 47, 46, 48, 49, 50]
+        });
+        state.selectedId = id;
+      }
+      state.detailTab = "score";
+      render();
+      showToast("临时评分已生成，结果已展示在详情区。", "ok");
+    }
+
+    document.addEventListener("click", (event) => {
+      const favoriteAction = event.target.closest("[data-action='favorite']");
+      if (favoriteAction) {
+        event.stopPropagation();
+        toggleFavorite(favoriteAction.dataset.id);
+        return;
+      }
+      const detailAction = event.target.closest("[data-action='detail']");
+      if (detailAction) {
+        event.stopPropagation();
+        state.selectedId = detailAction.dataset.id;
+        state.detailTab = "score";
+        render();
+        return;
+      }
+      const card = event.target.closest(".candidate");
+      if (card) {
+        state.selectedId = card.dataset.id;
+        state.detailTab = "score";
+        render();
+        return;
+      }
+      const remove = event.target.closest("[data-remove]");
+      if (remove) {
+        state.favorites.delete(remove.dataset.remove);
+        render();
+      }
+    });
+
+    document.querySelectorAll(".filter-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.activeFilter = button.dataset.filter;
+        document.querySelectorAll(".filter-button").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        render();
+      });
+    });
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        state.detailTab = tab.dataset.tab;
+        renderDetail();
+      });
+    });
+    document.getElementById("detailFavorite").addEventListener("click", () => toggleFavorite(state.selectedId));
+    document.getElementById("scanButton").addEventListener("click", startScan);
+    document.getElementById("scoreButton").addEventListener("click", runSearchScore);
+    document.getElementById("searchInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") runSearchScore();
+    });
+    document.getElementById("reportButton").addEventListener("click", () => {
+      state.reportGenerated = true;
+      showToast("报告 HTML 已生成并等待入库。摘要会存库，K 线详情仍按需接口获取。", "ok");
+    });
+    document.getElementById("shareButton").addEventListener("click", () => {
+      if (!state.reportGenerated) {
+        showToast("请先生成报告。后续可把报告 HTML 发布到公网只读链接。", "warn");
+      } else {
+        showToast("分享占位：后续可生成公网只读链接，只暴露报告 HTML。", "ok");
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
